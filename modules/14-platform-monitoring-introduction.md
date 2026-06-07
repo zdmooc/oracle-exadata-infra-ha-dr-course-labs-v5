@@ -1,225 +1,711 @@
-    # Module 14 — Platform Monitoring Introduction
+# Module 14 — Platform Monitoring Introduction
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Construire une vision d’observabilité Exadata sur les couches DB, GI, storage, réseau et support. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module introduit le **monitoring global d’une plateforme Oracle Exadata**.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de comprendre que le monitoring Exadata est multi-couches : une lenteur visible côté application peut provenir de la base, du cluster, d’ASM, des Storage Cells, du réseau, d’un composant matériel ou d’un outil de supervision.
 
-    Le monitoring Exadata est multi-couches. Un incident visible dans la base peut avoir une origine storage, réseau ou cluster. Le cours enseigne comment lire les signaux de chaque couche.
+À la fin de ce module, le lecteur doit être capable de :
 
-    Le monitoring Exadata transforme des signaux dispersés en preuve d’exploitation. Il sert à relier un symptôme applicatif aux métriques database, cluster, storage cell, réseau ou support automatisé.
+- identifier les couches à surveiller sur Exadata ;
+- relier un symptôme applicatif à une couche technique ;
+- construire une timeline d’incident ;
+- distinguer métrique, alerte, symptôme et cause racine ;
+- comprendre le rôle d’Enterprise Manager, AHF, TFA, Exachk, CellCLI et OSWatcher ;
+- définir une baseline ;
+- lire des signaux database, cluster, storage, réseau et matériel ;
+- éviter de conclure à partir d’un seul graphique.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **Baseline** | État de référence décrivant comportement normal d’une plateforme. | La latence I/O moyenne en heure creuse n’est pas comparée à un pic batch. |
-| **Timeline incident** | Chronologie des symptômes, changements et alertes. | Un patch réseau à 22h précède des erreurs interconnect à 22h15. |
-| **Target monitoring** | Objet surveillé par EM ou outil équivalent. | Une database, une ASM instance ou une storage cell est un target. |
+## 2. Pourquoi le monitoring Exadata est spécifique
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **Baseline** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
+Exadata n’est pas un serveur Oracle isolé.
 
-    ## 4. Architecture concernée
+Une plateforme Exadata combine :
 
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
-
-    Les diagrammes associés au chapitre sont :
-
-    - [`monitoring-stack.mmd`](../diagrams/monitoring-stack.mmd)
-
-    ## 5. Fonctionnement détaillé
-
-    Le monitoring Exadata est multi-couches. Un incident visible dans la base peut avoir une origine storage, réseau ou cluster. Le cours enseigne comment lire les signaux de chaque couche.
-
-    Le fonctionnement se lit par corrélation temporelle : événement métier, métrique database, état cluster, alerte cell, métrique réseau et rapport d’outil. Le diagnostic valide que les horodatages, instances et composants désignent la même période.
-
-    Pour ce module, les notions centrales sont **Baseline, Timeline incident, Target monitoring**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour le monitoring, l’analyse commence par la question opérationnelle à résoudre, puis sélectionne les métriques utiles au lieu d’empiler des graphiques sans hypothèse. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
-
-    ## 6. Exemple concret
-
-    Une application se plaint de lenteurs ; aucun composant isolé ne suffit à expliquer le symptôme.
-
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
-
-    ## 7. Commandes, vues et métriques utiles
-
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
-
-    ```bash
-    crsctl stat res -t
-cellcli -e "list alerthistory detail"
-tfactl print status
-    ```
-
-    | Élément à lire | Interprétation |
-    |---|---|
-    | Baseline | Cette information indique comment le mécanisme Baseline se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Timeline incident | Cette information indique comment le mécanisme Timeline incident se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Target monitoring | Cette information indique comment le mécanisme Target monitoring se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-
-    ## 8. Interprétation des résultats
-
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
-
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
-
-    ## 9. Erreurs fréquentes
-
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
-
-    ## 10. Bonnes pratiques
-
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
-
-    ## 11. Exercice pratique
-
-    Vous êtes responsable du sujet **Platform Monitoring Introduction** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
-
-    > Une application se plaint de lenteurs ; aucun composant isolé ne suffit à expliquer le symptôme.
-
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
-
-    ## 12. Corrigé de l’exercice
-
-    Une bonne réponse commence par identifier les composants du chapitre : **Baseline, Timeline incident, Target monitoring**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
-
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance.  : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
-
-    ## 13. Synthèse à retenir
-
-    ```text
-    À retenir
-    - Platform Monitoring Introduction  : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : Baseline, Timeline incident, Target monitoring.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
-
-
-
-
-## Rectification V5 vérifiable — contenu expert non générique
-
-Cette section rend visible la finition experte V5 pour **Introduction au monitoring plateforme**. Elle impose un raisonnement lié aux objets réels du thème plutôt qu’une formule répétée entre modules.
-
-| Élément expert V5 | Application concrète au module |
-|---|---|
-| Objets à contrôler | événements database, alertes cell, métriques OS, Enterprise Manager, AHF. |
-| Méthode de diagnostic | transformer des signaux dispersés en chronologie unique. |
-| Cas d’école attendu | un pic applicatif doit être rapproché des métriques base, cell et réseau de la même minute. |
-| Preuve minimale | Une sortie read-only horodatée, un composant nommé, une métrique interprétée et une conséquence métier. |
-| Limite | Le diagnostic reste invalide si la preuve ne distingue pas charge normale, anomalie transitoire et cause racine. |
-
-### Raisonnement attendu
-
-Pour **Introduction au monitoring plateforme**, l’analyse commence par une question précise. L’administrateur ne cherche pas à appliquer une recette, mais à démontrer ou exclure une hypothèse. Les preuves doivent être collectées sans modification de configuration, puis rapprochées de la fenêtre horaire, du workload et de la version de plateforme. Une conclusion professionnelle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans augmenter le risque opérationnel.
-
-### Exercice V5 complémentaire
-
-Analysez le cas suivant : **un pic applicatif doit être rapproché des métriques base, cell et réseau de la même minute**. Produisez une note courte contenant le symptôme, les objets Exadata concernés, trois preuves read-only, les hypothèses rejetées et la recommandation.
-
-### Corrigé V5 complémentaire
-
-La réponse correcte nomme les objets du module, explique pourquoi les preuves choisies testent l’hypothèse et sépare diagnostic, décision et changement. Elle ne propose pas de modification immédiate si les métriques ne démontrent pas la cause. Elle prévoit également une validation après action, car une correction Exadata doit être prouvée par la disparition du symptôme ou par le retour à un niveau de service attendu.
-
-## Références officielles
-
-| Référence | Utilisation dans le module |
-|---|---|
-| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
-| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Administration Exadata, Storage Server, CellCLI, maintenance et monitoring. |
-| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
-| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
-| [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
-## Complément expert V5 — Introduction au monitoring Exadata multi-couches
-
-### Explication technique spécifique
-
-Le monitoring Exadata ne consiste pas à regarder une seule alerte ou un seul graphe. Pour **la plate-forme Exadata complète**, l’objectif est de rapprocher l’état matériel, l’état logiciel, les métriques courantes et la perception côté base. Une alerte cellule peut être bénigne si elle correspond à une transition attendue, mais elle peut aussi expliquer une hausse de latence observée par les sessions Oracle. La démarche experte consiste à identifier la mesure native, son objet, son horodatage, puis à la comparer avec les waits, les statistiques SQL et l’état ASM. Enterprise Manager apporte une vision centralisée, tandis que `cellcli`, les vues dynamiques et les journaux de diagnostic donnent une preuve locale.[^v5-monitoring]
-
-Pour ce thème, un DBA confirmé doit distinguer **symptôme**, **cause probable** et **preuve observable**. Le symptôme typique est : une hausse simultanée des temps de réponse SQL et des alertes de capacité. La cause peut être locale au composant, liée à une saturation, à une opération planifiée ou à une panne partielle. La preuve doit venir d’au moins deux sources indépendantes : métrique cellule et vue base, alerte système et historique Enterprise Manager, ou état ASM et journal Exadata.
-
-| Indicateur | Ce qu’il mesure | Interprétation experte |
-|---|---|---|
-| `DB_IO_RQ_SM_SEC` | Débit de petites I/O côté base ou cellule selon contexte | Utile pour distinguer OLTP intensif et scans volumineux |
-| `CL_CPUT` | Utilisation CPU cellule | Une cellule CPU-bound peut ralentir offload et compression |
-| `GD_IO_RQ_LG_SEC` | Grandes requêtes I/O sur grid disks | Souvent lié aux scans, backups ou chargements |
-
-```mermaid
-flowchart LR
-    APP[Applications] --> DB[Instances RAC]
-    DB --> ASM[ASM]
-    ASM --> CELL[Storage Cells]
-    CELL --> MET[Métriques CellCLI]
-    DB --> AWR[AWR / ASH]
-    MET --> EM[Enterprise Manager]
-    AWR --> EM
+```text
+Database Servers
+Oracle Database
+Grid Infrastructure
+ASM
+Storage Cells
+Flash Cache
+Smart Scan
+IORM
+Réseau interne RoCE / InfiniBand
+Réseaux client / admin / backup
+ILOM / PDU / switches
+Enterprise Manager
+AHF / TFA / Exachk
 ```
 
-### Exemple concret réaliste
+Un incident peut apparaître dans une couche et avoir sa cause dans une autre.
 
-Pendant une fenêtre de reporting, l’équipe observe une hausse simultanée des temps de réponse SQL et des alertes de capacité. Le réflexe débutant serait de conclure à un problème général de performance. L’analyse V5 impose plutôt de vérifier si l’événement est isolé à une cellule, à un database server, à un réseau ou à une base. Si une seule cellule montre une métrique anormale alors que les autres restent stables, la piste est locale. Si toutes les cellules montrent la même hausse au même instant, il faut chercher une opération globale : chargement massif, backup, rebalance ASM, scan parallèle ou patching.
+Exemple :
 
-### Comment raisonner
+```text
+Symptôme visible : application lente
+Cause possible 1 : SQL mal optimisé
+Cause possible 2 : cell avec latence élevée
+Cause possible 3 : service RAC déplacé
+Cause possible 4 : backup en concurrence
+Cause possible 5 : réseau interne instable
+Cause possible 6 : saturation RECO/FRA
+```
 
-Commence par fixer la période exacte de l’incident, puis compare trois horloges : heure applicative, heure base et heure composant Exadata. Ensuite, identifie l’objet affecté : cellule, disque, flash, port réseau, instance, service, diskgroup ou target Enterprise Manager. Enfin, vérifie si l’anomalie modifie réellement l’expérience des sessions : hausse des waits, baisse de débit, erreurs applicatives ou alertes critiques. Une métrique élevée sans impact observable peut rester un signal de capacité ; une métrique modérée mais corrélée à des erreurs peut être prioritaire.
+À retenir :
 
-### Commandes / vues utiles
+```text
+Le monitoring Exadata sert à corréler les signaux.
+Il ne sert pas seulement à afficher des graphiques.
+```
 
-```bash
-cellcli -e "list cell detail"
-cellcli -e "list metriccurrent attributes name,metricValue,objectName"
-cellcli -e "list alerthistory attributes severity,alertMessage,beginTime"
+---
+
+## 3. Les couches de monitoring
+
+| Couche | Ce qu’on surveille | Outils / vues |
+|---|---|---|
+| Application | Temps de réponse, erreurs, transactions | APM, logs applicatifs |
+| Oracle Database | sessions, SQL, wait events, AWR/ASH | SQL, AWR, ASH, EM |
+| RAC / GI | services, listeners, VIP, ressources CRS | crsctl, srvctl, EM |
+| ASM | DATA, RECO, rebalance, diskgroups | asmcmd, vues ASM |
+| Storage Cells | flash, griddisks, disks, alerts, metrics | CellCLI, EM |
+| Réseau | client, admin, backup, RDMA fabric | OS, switch, CellCLI, AHF |
+| Matériel | ILOM, PDU, alimentation, température | ILOM, EM, alertes |
+| Support | collecte, rapport santé, diagnostic | AHF, TFA, Exachk |
+
+---
+
+## 4. Symptôme, métrique, alerte et cause
+
+Il faut distinguer quatre notions.
+
+| Notion | Définition | Exemple |
+|---|---|---|
+| Symptôme | Ce que l’utilisateur ou l’application observe | lenteur paiement |
+| Métrique | Mesure technique | latence I/O, CPU, wait time |
+| Alerte | Signal dépassant une règle ou un seuil | alerte cell, disque predictive failure |
+| Cause racine | Origine réelle du problème | griddisk dégradé, mauvais plan SQL |
+
+Erreur fréquente :
+
+```text
+Une alerte visible n’est pas forcément la cause racine.
+```
+
+Bonne démarche :
+
+```text
+symptôme
+→ période
+→ composant
+→ métriques
+→ corrélation
+→ hypothèse
+→ preuve
+→ conclusion
+```
+
+---
+
+## 5. Baseline
+
+### 5.1 Définition
+
+Une baseline est un état de référence.
+
+Elle décrit le comportement normal d’une plateforme.
+
+Exemples de baseline :
+
+```text
+latence I/O normale
+débit RMAN habituel
+CPU moyen par plage horaire
+volume archivelog par jour
+temps batch habituel
+nombre de sessions par service
+DATA / RECO / FRA habituels
+lag Data Guard normal
+```
+
+### 5.2 Pourquoi elle est indispensable
+
+Sans baseline, une valeur est difficile à interpréter.
+
+Exemple :
+
+```text
+Latence I/O = 8 ms
+```
+
+Question :
+
+```text
+Est-ce normal ou anormal ?
+```
+
+Réponse correcte :
+
+```text
+Cela dépend de la baseline, du workload, de la période et de la couche observée.
+```
+
+---
+
+## 6. Timeline d’incident
+
+La timeline relie les événements dans le temps.
+
+Elle doit contenir :
+
+```text
+heure du symptôme métier
+heure des alertes
+heure des changements
+heure des pics CPU/I/O
+heure des batchs
+heure des sauvegardes
+heure des bascules ou maintenances
+heure des erreurs réseau
+heure des collectes TFA/AHF
+```
+
+Exemple :
+
+```text
+21:55 début backup RMAN
+22:00 batch reporting
+22:05 hausse cell smart table scan
+22:08 latence griddisk sur cell02
+22:10 application lente
+22:20 alerte EM
+22:30 retour normal
+```
+
+À retenir :
+
+```text
+Une bonne timeline vaut souvent mieux que dix graphiques isolés.
+```
+
+---
+
+## 7. Architecture de monitoring Exadata
+
+Schéma logique :
+
+```mermaid
+flowchart TB
+    A[Application] --> B[Oracle Database]
+    B --> C[Grid Infrastructure / RAC]
+    B --> D[ASM]
+    D --> E[Storage Cells]
+    C --> F[Réseau interne RoCE / InfiniBand]
+    E --> F
+    B --> G[Enterprise Manager]
+    C --> G
+    D --> G
+    E --> G
+    F --> G
+    H[AHF / TFA / Exachk] --> G
+    I[ILOM / PDU / Switches] --> G
+```
+
+Ce schéma rappelle que le monitoring doit relier plusieurs couches.
+
+---
+
+## 8. Monitoring database
+
+Côté base Oracle, on surveille :
+
+```text
+sessions
+services
+SQL_ID
+AWR
+ASH
+wait events
+plans SQL
+CPU
+I/O
+locks
+temp
+undo
+```
+
+Commandes / vues read-only :
+
+```sql
+select inst_id, instance_name, host_name, status
+from gv$instance
+order by inst_id;
 ```
 
 ```sql
-select inst_id, event, total_waits, time_waited_micro
-from gv$system_event
-where event like 'cell%' or event like 'gc%' or event like 'log file%'
-order by time_waited_micro desc fetch first 20 rows only;
-
-select inst_id, name, value
-from gv$sysstat
-where name like 'cell%' or name like 'physical%'
-order by inst_id, name;
+select inst_id, service_name, count(*) as sessions
+from gv$session
+where type = 'USER'
+group by inst_id, service_name
+order by sessions desc;
 ```
 
-### Comment interpréter
+```sql
+select event, total_waits, time_waited
+from v$system_event
+order by time_waited desc;
+```
 
-L’interprétation correcte cherche une corrélation, pas une coïncidence. Si la métrique change avant le symptôme applicatif, elle peut être causale. Si elle change après, elle peut être une conséquence. Si elle ne change que sur un composant, la portée est locale. Si elle change partout, la cause est probablement un workload ou une opération de plate-forme. Une hausse globale sans alerte matérielle oriente vers le workload ; une alerte critique localisée oriente vers composant.
+---
 
-### Exercice pratique
+## 9. Monitoring RAC / Grid Infrastructure
 
-Un rapport EM montre une hausse globale de latence à 22h00. Décris comment distinguer incident plate-forme et batch applicatif.
+Côté RAC/GI, on surveille :
 
-### Corrigé détaillé
+```text
+état des ressources CRS
+bases
+instances
+listeners
+SCAN
+VIP
+services
+ASM
+placement des services
+```
 
-La bonne réponse commence par la chronologie et l’étendue. Si toutes les bases et cellules sont touchées à 22h00, un batch, backup ou rebalance global est probable. Si une seule base souffre, il faut inspecter ses plans SQL et services. On vérifie les alertes, métriques cellule, waits GV$ et jobs planifiés. La conclusion est justifiée seulement si les sources convergent.
+Commandes :
 
-### Limites et pièges
+```bash
+crsctl stat res -t
+srvctl status database -d <db_unique_name> -v
+srvctl status service -d <db_unique_name>
+srvctl config service -d <db_unique_name>
+srvctl status scan
+```
 
-Le principal piège est de diagnostiquer depuis une capture unique. Exadata est fortement parallèle : un instantané peut masquer un pic court, un effet de cache ou une opération transitoire. Il faut conserver l’horodatage, comparer plusieurs composants et éviter les actions correctives sans preuve. Les commandes proposées ici restent read-only et servent à documenter l’état, pas à modifier la plate-forme.
+Point important :
 
-### À retenir
+```text
+Une base ouverte ne signifie pas forcément que le service applicatif est disponible.
+```
 
-Pour la plate-forme Exadata complète, le monitoring expert relie métriques Exadata, vues Oracle, alertes et chronologie. La valeur pédagogique vient de l’interprétation, pas de l’accumulation de sorties brutes.
+---
 
-[^v5-monitoring]: Oracle, *Monitoring Oracle Exadata Database Machine*, https://docs.oracle.com/en/engineered-systems/exadata-database-machine/dbmmn/
+## 10. Monitoring ASM
+
+ASM est central pour Exadata.
+
+À surveiller :
+
+```text
+DATA
+RECO
+free_mb
+usable_file_mb
+rebalance
+disques
+failure groups
+état des diskgroups
+```
+
+Commandes :
+
+```bash
+asmcmd lsdg
+asmcmd lsdsk -p
+```
+
+```sql
+select name, total_mb, free_mb, usable_file_mb, type, state
+from v$asm_diskgroup
+order by name;
+```
+
+```sql
+select group_number, operation, state, power, est_minutes
+from v$asm_operation;
+```
+
+---
+
+## 11. Monitoring Storage Cells
+
+Côté Storage Cells, on surveille :
+
+```text
+cell status
+alert history
+metric current
+metric history
+physical disks
+cell disks
+grid disks
+flash cache
+flash log
+IORM
+latence
+débit
+erreurs
+```
+
+Commandes :
+
+```bash
+cellcli -e "list cell detail"
+cellcli -e "list alert history"
+cellcli -e "list metriccurrent"
+cellcli -e "list griddisk attributes name,status,asmmodestatus,asmdeactivationoutcome,size"
+cellcli -e "list physicaldisk attributes name,status,errormessage"
+```
+
+À retenir :
+
+```text
+Les Storage Cells donnent des preuves utiles sur les I/O.
+Mais il faut les relier aux SQL, services et périodes.
+```
+
+---
+
+## 12. Monitoring réseau
+
+Le réseau Exadata n’est pas unique.
+
+Réseaux à distinguer :
+
+```text
+réseau client
+réseau administration
+réseau backup
+réseau interne RoCE / InfiniBand
+réseau Data Guard selon architecture
+```
+
+Symptômes possibles :
+
+| Réseau | Symptôme possible |
+|---|---|
+| Client | connexions lentes ou impossibles |
+| Admin | monitoring ou accès SSH perturbé |
+| Backup | RMAN lent |
+| Interne | latence cell, RAC, ASM |
+| Data Guard | transport lag |
+
+À retenir :
+
+```text
+Une lenteur backup ne doit pas être diagnostiquée comme une lenteur SQL sans preuve.
+```
+
+---
+
+## 13. Monitoring matériel
+
+Certains composants ne sont pas visibles dans SQL.
+
+À surveiller :
+
+```text
+ILOM
+PDU
+alimentation
+ventilateurs
+température
+disques physiques
+switches
+capteurs
+firmware
+```
+
+Une alerte matérielle doit être prise au sérieux parce qu’elle peut précéder :
+
+```text
+perte d’un disque
+dégradation flash
+problème alimentation
+throttling
+panne serveur
+incident réseau
+```
+
+---
+
+## 14. Enterprise Manager
+
+Enterprise Manager fournit une vue centralisée.
+
+Il peut surveiller :
+
+```text
+database
+listener
+ASM
+host
+Exadata rack
+Storage Cells
+incidents
+métriques
+alertes
+blackouts
+jobs
+```
+
+Mais il faut vérifier :
+
+```text
+agent actif
+targets découverts
+blackouts terminés
+seuils adaptés
+incidents visibles
+données récentes
+```
+
+Erreur fréquente :
+
+```text
+Aucune alerte dans EM = aucun problème.
+```
+
+Correction :
+
+```text
+Vérifier aussi la couche locale : SQL, crsctl, asmcmd, CellCLI, AHF/TFA.
+```
+
+---
+
+## 15. AHF, TFA, Exachk, OSWatcher
+
+Ces outils complètent le monitoring.
+
+| Outil | Usage |
+|---|---|
+| AHF | Framework santé et diagnostic Oracle |
+| TFA | Collecte de traces autour d’un incident |
+| Exachk | Vérification santé / bonnes pratiques Exadata |
+| ORAchk | Vérification santé Oracle plus générale |
+| OSWatcher | Historique OS pour CPU, mémoire, I/O, réseau |
+
+À retenir :
+
+```text
+Ces outils accélèrent le diagnostic.
+Ils ne remplacent pas le raisonnement technique.
+```
+
+---
+
+## 16. Méthode de diagnostic monitoring
+
+Méthode simple :
+
+```text
+1. Décrire le symptôme métier.
+2. Fixer la période exacte.
+3. Identifier les composants concernés.
+4. Lire la couche database.
+5. Lire la couche RAC/GI.
+6. Lire ASM.
+7. Lire Storage Cells.
+8. Vérifier réseau si cohérent avec le symptôme.
+9. Vérifier matériel si alerte.
+10. Corréler avec timeline.
+11. Comparer à la baseline.
+12. Conclure seulement sur preuve.
+```
+
+---
+
+## 17. Tableau symptôme → couche à vérifier
+
+| Symptôme | Couches à vérifier |
+|---|---|
+| Application lente | DB, SQL, ASH, cells, réseau, batch concurrent |
+| Connexion impossible | service RAC, listener, SCAN, réseau client |
+| Backup lent | RMAN, RECO/FRA, réseau backup, cells |
+| Data Guard lag | redo transport, réseau, standby, apply, I/O |
+| Cell alert | CellCLI, ASM, alert history, physical disks |
+| CPU élevé | DB server, SQL_ID, sessions, OSWatcher |
+| RECO plein | ASM, FRA, archivelogs, backup |
+| Service déplacé | CRS, srvctl, services RAC |
+| Incident intermittent | timeline, TFA, AHF, OSWatcher |
+
+---
+
+## 18. Erreurs fréquentes
+
+| Erreur | Pourquoi c’est dangereux | Correction |
+|---|---|---|
+| Lire un seul graphique | Vision partielle | Corréler plusieurs couches |
+| Confondre alerte et cause | Faux diagnostic | Revenir à la timeline |
+| Ne pas avoir de baseline | Valeur non interprétable | Construire état de référence |
+| Ignorer les services RAC | Application invisible | Surveiller par service |
+| Ignorer Storage Cells | I/O non expliquées | Lire CellCLI |
+| Ignorer réseau backup | RMAN mal diagnostiqué | Séparer réseaux |
+| Croire EM suffisant | Agent ou target peut être KO | Vérifier localement |
+| Collecter trop large | Bruit inutile | Collecter selon hypothèse |
+
+---
+
+## 19. Commandes read-only utiles
+
+### Database
+
+```sql
+select inst_id, instance_name, host_name, status
+from gv$instance
+order by inst_id;
+```
+
+```sql
+select inst_id, service_name, count(*) as sessions
+from gv$session
+where type = 'USER'
+group by inst_id, service_name
+order by sessions desc;
+```
+
+### RAC / GI
+
+```bash
+crsctl stat res -t
+srvctl status database -d <db_unique_name> -v
+srvctl status service -d <db_unique_name>
+srvctl status scan
+```
+
+### ASM
+
+```bash
+asmcmd lsdg
+asmcmd lsdsk -p
+```
+
+### Storage Cells
+
+```bash
+cellcli -e "list cell detail"
+cellcli -e "list alert history"
+cellcli -e "list metriccurrent"
+```
+
+### AHF / TFA
+
+```bash
+ahfctl status
+tfactl print status
+tfactl diagcollect -help
+```
+
+---
+
+## 20. Exercice pratique
+
+Une application se plaint de lenteurs entre 22h00 et 22h30.
+
+Aucun composant isolé ne donne immédiatement la cause.
+
+Contexte :
+
+```text
+un batch reporting tourne à 22h
+une sauvegarde RMAN démarre à 21h55
+une alerte cell apparaît à 22h10
+le service applicatif reste online
+la base reste ouverte
+```
+
+Répondez :
+
+1. Quelle timeline construisez-vous ?
+2. Quelles couches vérifiez-vous en premier ?
+3. Quelles commandes read-only utilisez-vous ?
+4. Comment distinguer symptôme, alerte et cause ?
+5. Quelle conclusion prudente formulez-vous ?
+
+---
+
+## 21. Corrigé indicatif
+
+Timeline attendue :
+
+```text
+21h55 : début RMAN
+22h00 : début batch reporting
+22h10 : alerte cell
+22h00-22h30 : lenteur applicative
+```
+
+Couches à vérifier :
+
+```text
+database / ASH
+services RAC
+ASM
+Storage Cells
+RMAN / backup network
+IORM si actif
+alert history
+```
+
+Commandes :
+
+```bash
+crsctl stat res -t
+srvctl status service -d <db_unique_name>
+asmcmd lsdg
+cellcli -e "list alert history"
+cellcli -e "list metriccurrent"
+```
+
+```sql
+select inst_id, sql_id, event, count(*) as samples
+from gv$active_session_history
+where sample_time between timestamp '2026-01-01 22:00:00'
+                      and timestamp '2026-01-01 22:30:00'
+group by inst_id, sql_id, event
+order by samples desc;
+```
+
+Conclusion prudente :
+
+```text
+La lenteur ne doit pas être attribuée automatiquement à l’alerte cell.
+Il faut corréler la période avec le batch, RMAN, les wait events,
+les métriques cells et la baseline avant de conclure.
+```
+
+---
+
+## 22. À retenir
+
+```text
+À retenir
+- Le monitoring Exadata est multi-couches.
+- Un symptôme applicatif peut venir de DB, RAC, ASM, cells, réseau ou matériel.
+- La timeline est centrale.
+- Une baseline est indispensable.
+- Enterprise Manager centralise, mais ne suffit pas seul.
+- CellCLI donne des preuves côté Storage Cells.
+- AHF/TFA/Exachk aident à collecter et structurer.
+- Une alerte n’est pas toujours la cause racine.
+- La bonne démarche est : symptôme → période → couche → preuve → conclusion.
+```
+
+---
+
+## 23. Références officielles
+
+| Référence | Utilisation dans le module |
+|---|---|
+| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Architecture Exadata, Storage Cells, monitoring. |
+| [Oracle Enterprise Manager Documentation](https://docs.oracle.com/en/enterprise-manager/) | Targets, agents, incidents, blackouts, monitoring centralisé. |
+| [Oracle Autonomous Health Framework Documentation](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, TFA, ORAchk, Exachk. |
+| [Oracle Database Performance Tuning Guide](https://docs.oracle.com/en/database/) | AWR, ASH, wait events, SQL monitoring. |
+| [Oracle Real Application Clusters Documentation](https://docs.oracle.com/en/database/) | RAC, services, GI, CRS. |
