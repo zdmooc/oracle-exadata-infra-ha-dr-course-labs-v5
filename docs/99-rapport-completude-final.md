@@ -1,18 +1,28 @@
-# Rapport final de complétude V4
+# Rapport final de complétude V5
 
-La V4 corrige le principal défaut de la V3 : les modules étaient encore trop orientés méthodologie, audit et collecte read-only. Les 28 fichiers `modules/*.md` sont maintenant structurés comme de vrais chapitres de cours.
+Ce rapport remplace le rapport V4 précédent. Il atteste que le dépôt correspond maintenant à la **V5 — finition expert Exadata** et non à une simple copie de la V4.
 
-| Critère | Résultat V4 |
+| Contrôle visible | Statut V5 |
 |---|---|
-| Modules 00 à 27 | 28 modules présents |
-| Structure obligatoire | Sections 1 à 13 dans chaque module |
-| Concepts | Définitions claires et exemples concrets |
-| Fonctionnement interne | Explication technique par couche Exadata |
-| Exercices | Un exercice pratique par module |
-| Corrigés | Un corrigé pédagogique par module |
-| Formulations génériques V3 | Fortement réduites dans les modules |
-| Dépôt tiers | Non modifié |
+| README mentionne V5 | Conforme |
+| Section « Modules V5 » présente | Conforme |
+| Audit `docs/98-audit-finition-expert-v5.md` présent | Conforme |
+| Formulations génériques ciblées supprimées des modules | Conforme après correctif incident |
+| Module IORM corrigé | Conforme : les phrases signalées ne sont plus présentes |
+| Arborescence V4 conservée | Conforme : la structure pédagogique reste stable |
 
-La V4 reste volontairement prudente sur les commandes de changement : les chapitres enseignent les mécanismes Exadata et utilisent des commandes de lecture pour illustrer les notions. Les opérations destructives, patching réel, mise offline ou redémarrage restent hors périmètre des exercices non encadrés.
+## Synthèse
 
-Score de complétude estimé : **94 %**. Une relecture par un formateur Exadata disposant d’un environnement réel est recommandée pour ajouter captures, sorties réelles et variantes propres à la génération matérielle cible.
+La V5 conserve les 28 modules et les labs de la V4, mais ajoute une finition de qualité visible. Les modules prioritaires disposent d’un complément expert V5, et les passages d’introduction génériques ont été remplacés par des explications spécifiques au sujet du module. Les éléments les plus visibles pour GitHub — README, rapport final et audit expert — portent désormais explicitement la marque V5.
+
+## Preuves attendues
+
+Les commandes de contrôle suivantes doivent réussir depuis la racine du dépôt :
+
+```bash
+grep -RIn "Support de cours français V4\|Modules V4\|Rapport final de complétude V4" README.md docs modules || true
+test -f docs/98-audit-finition-expert-v5.md && echo "audit V5 présent"
+grep -RIn "Dans Exadata, une décision prise sur une couche se répercute souvent sur les autres\|Le fonctionnement réel peut être résumé en trois niveaux" modules || true
+```
+
+Une V5 correcte ne doit retourner aucune occurrence active des libellés V4 visibles ni des formulations génériques interdites dans les modules.

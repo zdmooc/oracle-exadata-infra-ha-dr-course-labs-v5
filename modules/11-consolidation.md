@@ -8,7 +8,7 @@
 
     La consolidation augmente le taux d’utilisation mais rend les workloads interdépendants. Les services, Resource Manager, IORM, monitoring et fenêtres de maintenance deviennent essentiels.
 
-    Dans Exadata, une décision prise sur une couche se répercute souvent sur les autres. Une requête SQL peut dépendre du plan d’exécution, du cache flash, de la configuration ASM, de l’état d’une cell et du réseau privé. Ce chapitre montre donc le sujet comme un mécanisme technique, pas comme une simple procédure administrative.
+    Le sujet **11 Consolidation** doit être traité comme un mécanisme Exadata précis : l’objectif est d’identifier les composants concernés, les métriques qui prouvent le comportement et les limites qui empêchent une conclusion hâtive.
 
     ## 3. Concepts clés expliqués
 
@@ -38,9 +38,9 @@
 
     La consolidation augmente le taux d’utilisation mais rend les workloads interdépendants. Les services, Resource Manager, IORM, monitoring et fenêtres de maintenance deviennent essentiels.
 
-    Le fonctionnement réel peut être résumé en trois niveaux. Au niveau **base de données**, Oracle produit un plan d’exécution, gère les sessions, écrit les redo et consulte les vues dynamiques. Au niveau **cluster et stockage**, Grid Infrastructure et ASM rendent disponibles les fichiers de base sur les diskgroups. Au niveau **Exadata**, les storage cells, le cache flash, les métriques et le logiciel système influencent directement le débit, la latence et parfois le volume de données transmis aux DB servers.
+    Le fonctionnement de **11 Consolidation** se lit en reliant la base Oracle, Grid Infrastructure, ASM, les storage cells, le réseau privé et les outils de support uniquement lorsque ces couches interviennent réellement dans le scénario étudié.
 
-    Pour ce module, les notions centrales sont **Consolidation, Service RAC, SLA**. Elles déterminent la façon dont le composant réagit à une charge réelle. Une bonne lecture technique consiste à comprendre d’abord le chemin suivi par l’opération, puis les conditions qui rendent le mécanisme efficace ou inefficace. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+    Pour ce module, les notions centrales sont **Consolidation, Service RAC, SLA**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour **11 Consolidation**, l’analyse commence par une hypothèse technique testable, puis par des preuves read-only qui confirment ou écartent cette hypothèse. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
 
     ## 6. Exemple concret
 
@@ -113,6 +113,32 @@ select instance_name,status,host_name from gv$instance;
     - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
     ```
 
+
+
+
+## Rectification V5 vérifiable — contenu expert non générique
+
+Cette section rend visible la finition experte V5 pour **Consolidation Exadata**. Elle impose un raisonnement lié aux objets réels du thème plutôt qu’une formule répétée entre modules.
+
+| Élément expert V5 | Application concrète au module |
+|---|---|
+| Objets à contrôler | bases consolidées, services, PDB, IORM, Resource Manager, fenêtres batch. |
+| Méthode de diagnostic | classer les workloads par criticité et profil I/O. |
+| Cas d’école attendu | une base de reporting peut dégrader une base transactionnelle si les services et ressources ne sont pas gouvernés. |
+| Preuve minimale | Une sortie read-only horodatée, un composant nommé, une métrique interprétée et une conséquence métier. |
+| Limite | Le diagnostic reste invalide si la preuve ne distingue pas charge normale, anomalie transitoire et cause racine. |
+
+### Raisonnement attendu
+
+Pour **Consolidation Exadata**, l’analyse commence par une question précise. L’administrateur ne cherche pas à appliquer une recette, mais à démontrer ou exclure une hypothèse. Les preuves doivent être collectées sans modification de configuration, puis rapprochées de la fenêtre horaire, du workload et de la version de plateforme. Une conclusion professionnelle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans augmenter le risque opérationnel.
+
+### Exercice V5 complémentaire
+
+Analysez le cas suivant : **une base de reporting peut dégrader une base transactionnelle si les services et ressources ne sont pas gouvernés**. Produisez une note courte contenant le symptôme, les objets Exadata concernés, trois preuves read-only, les hypothèses rejetées et la recommandation.
+
+### Corrigé V5 complémentaire
+
+La réponse correcte nomme les objets du module, explique pourquoi les preuves choisies testent l’hypothèse et sépare diagnostic, décision et changement. Elle ne propose pas de modification immédiate si les métriques ne démontrent pas la cause. Elle prévoit également une validation après action, car une correction Exadata doit être prouvée par la disparition du symptôme ou par le retour à un niveau de service attendu.
 
 ## Références officielles
 

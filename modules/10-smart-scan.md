@@ -8,7 +8,7 @@
 
     Smart Scan s’active surtout sur des scans volumineux et certains accès direct path. La cell applique les prédicats compatibles, renvoie les colonnes nécessaires et peut exploiter Storage Indexes ou HCC selon contexte.
 
-    . Une requête SQL peut dépendre du plan d’exécution, du cache flash, de la configuration ASM, de l’état d’une cell et du réseau privé. Ce chapitre montre donc le sujet comme un mécanisme technique, pas comme une simple procédure administrative.
+    Smart Scan est déterminant parce qu’il déplace une partie du filtrage, de la projection et parfois du traitement vers les storage cells. L’enjeu n’est pas seulement d’accélérer une requête, mais de réduire le volume renvoyé aux database servers et de distinguer les accès éligibles des accès qui resteront traités côté instance.
 
     ## 3. Concepts clés expliqués
 
@@ -38,9 +38,9 @@
 
     Smart Scan s’active surtout sur des scans volumineux et certains accès direct path. La cell applique les prédicats compatibles, renvoie les colonnes nécessaires et peut exploiter Storage Indexes ou HCC selon contexte.
 
-    . Au niveau **base de données**, Oracle produit un plan d’exécution, gère les sessions, écrit les redo et consulte les vues dynamiques. Au niveau **cluster et stockage**, Grid Infrastructure et ASM rendent disponibles les fichiers de base sur les diskgroups. Au niveau **Exadata**, les storage cells, le cache flash, les métriques et le logiciel système influencent directement le débit, la latence et parfois le volume de données transmis aux DB servers.
+    Le fonctionnement Smart Scan se vérifie en suivant le plan SQL, l’accès direct path, les prédicats offloadables, les compteurs `cell physical IO bytes eligible for predicate offload` et les bytes réellement retournés. Une lecture correcte relie le SQL, les segments, la compression, les statistiques et les métriques cellule.
 
-    Pour ce module, les notions centrales sont **Offload SQL, Eligible bytes, Returned bytes**. Elles déterminent la façon dont le composant réagit à une charge réelle. Une bonne lecture technique consiste à comprendre d’abord le chemin suivi par l’opération, puis les conditions qui rendent le mécanisme efficace ou inefficace. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+    Pour ce module, les notions centrales sont **Offload SQL, Eligible bytes, Returned bytes**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour Smart Scan, l’analyse commence par l’éligibilité de l’accès. On compare le plan, les bytes éligibles, les bytes interconnect et la sélectivité des prédicats avant d’attribuer un écart de performance à Exadata. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
 
     ## 6. Exemple concret
 
@@ -115,6 +115,34 @@ select name,value from v$sysstat where name like cell% order by name;
     - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
     ```
 
+
+
+
+## Rectification V5 vérifiable — contenu expert non générique
+
+Cette section constitue la correction V5 visible du module. Elle remplace l’approche répétitive par un raisonnement propre au thème **Smart Scan**. L’objectif n’est pas d’ajouter une phrase de méthode, mais de montrer comment un administrateur Exadata produit une preuve technique exploitable devant une équipe production, architecture ou support.
+
+| Élément expert V5 | Application concrète au module |
+|---|---|
+| Objets à nommer explicitement | offload, predicate filtering, storage index, direct path, eligible bytes. |
+| Méthode de diagnostic | comparer bytes éligibles, bytes retournés et plan SQL. |
+| Cas d’école attendu | un full scan peut être excellent si la cellule filtre massivement les données. |
+| Preuve minimale | Une commande ou vue read-only, une métrique datée, un composant identifié et une interprétation liée au risque métier. |
+| Limite de conclusion | Une mesure isolée ne suffit pas ; elle doit être reliée à la période, au workload, à la version Exadata et à l’objectif de service. |
+
+### Raisonnement attendu en situation réelle
+
+Pour **Smart Scan**, le diagnostic commence par une hypothèse précise et réfutable. L’administrateur doit formuler ce qu’il cherche à prouver : saturation, mauvais placement, absence d’offload, contention entre workloads, défaut de redondance, fenêtre de maintenance insuffisante ou frontière de responsabilité cloud. Ensuite, il collecte uniquement des preuves read-only. Cette discipline évite deux erreurs fréquentes : modifier une plateforme stable sans preuve et confondre un symptôme visible avec la cause racine.
+
+Le livrable attendu dans un contexte professionnel est une courte note technique. Elle doit contenir le symptôme, l’heure, les objets Exadata concernés, les commandes utilisées, les résultats observés, l’interprétation et la prochaine action. Si une modification est proposée, elle doit être séparée du diagnostic et rattachée à un runbook, une validation CAB ou une procédure de support Oracle.
+
+### Exercice V5 complémentaire
+
+Rédigez une analyse opérationnelle pour le cas suivant : **un full scan peut être excellent si la cellule filtre massivement les données**. Votre réponse doit citer les objets Exadata concernés, indiquer trois preuves read-only, expliquer ce qui invaliderait votre hypothèse et proposer une recommandation limitée au périmètre du module.
+
+### Corrigé V5 complémentaire
+
+Une bonne réponse identifie d’abord le composant dominant du sujet **Smart Scan**, puis relie les preuves à un impact mesurable. Les trois preuves doivent couvrir au moins deux couches différentes lorsque le sujet l’exige, par exemple base et cell, cluster et réseau, ou cloud et VM cluster. La recommandation est correcte seulement si elle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans créer un risque supérieur au problème initial.
 
 ## Références officielles
 

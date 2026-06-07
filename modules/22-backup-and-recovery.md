@@ -8,7 +8,7 @@
 
     Une sauvegarde n’a de valeur que si la récupération est possible dans les délais. Exadata peut accélérer certaines opérations, mais RMAN, archivelogs et tests restent indispensables.
 
-    . Une requête SQL peut dépendre du plan d’exécution, du cache flash, de la configuration ASM, de l’état d’une cell et du réseau privé. Ce chapitre montre donc le sujet comme un mécanisme technique, pas comme une simple procédure administrative.
+    La sauvegarde Exadata protège la restaurabilité réelle, pas seulement l’existence de fichiers RMAN. Elle doit être reliée aux objectifs RPO/RTO, à la bande passante, à la FRA, au catalogue et aux tests de restore.
 
     ## 3. Concepts clés expliqués
 
@@ -38,9 +38,9 @@
 
     Une sauvegarde n’a de valeur que si la récupération est possible dans les délais. Exadata peut accélérer certaines opérations, mais RMAN, archivelogs et tests restent indispensables.
 
-    . Au niveau **base de données**, Oracle produit un plan d’exécution, gère les sessions, écrit les redo et consulte les vues dynamiques. Au niveau **cluster et stockage**, Grid Infrastructure et ASM rendent disponibles les fichiers de base sur les diskgroups. Au niveau **Exadata**, les storage cells, le cache flash, les métriques et le logiciel système influencent directement le débit, la latence et parfois le volume de données transmis aux DB servers.
+    Le fonctionnement se lit depuis la base vers RMAN, les channels, les backup sets, la FRA ou le média externe, puis le scénario de restauration. Le diagnostic vérifie le dernier backup exploitable et la preuve de restauration.
 
-    Pour ce module, les notions centrales sont **RMAN, FRA, Restore validation**. Elles déterminent la façon dont le composant réagit à une charge réelle. Une bonne lecture technique consiste à comprendre d’abord le chemin suivi par l’opération, puis les conditions qui rendent le mécanisme efficace ou inefficace. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+    Pour ce module, les notions centrales sont **RMAN, FRA, Restore validation**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour le backup, l’analyse commence par ce qu’il faut restaurer, dans quel délai et à quel point dans le temps. Les listes de sauvegardes n’ont de valeur que si elles démontrent la capacité de reprise. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
 
     ## 6. Exemple concret
 
@@ -117,6 +117,32 @@ select * from v$recovery_file_dest;
     - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
     ```
 
+
+
+
+## Rectification V5 vérifiable — contenu expert non générique
+
+Cette section rend visible la finition experte V5 pour **Backup and Recovery**. Elle impose un raisonnement lié aux objets réels du thème plutôt qu’une formule répétée entre modules.
+
+| Élément expert V5 | Application concrète au module |
+|---|---|
+| Objets à contrôler | RMAN, FRA, catalog, restore validate, archivelogs, Data Guard, RPO/RTO. |
+| Méthode de diagnostic | prouver la restauration avant de considérer la sauvegarde comme fiable. |
+| Cas d’école attendu | un backup régulier sans test de restore peut rester inutilisable le jour d’un incident. |
+| Preuve minimale | Une sortie read-only horodatée, un composant nommé, une métrique interprétée et une conséquence métier. |
+| Limite | Le diagnostic reste invalide si la preuve ne distingue pas charge normale, anomalie transitoire et cause racine. |
+
+### Raisonnement attendu
+
+Pour **Backup and Recovery**, l’analyse commence par une question précise. L’administrateur ne cherche pas à appliquer une recette, mais à démontrer ou exclure une hypothèse. Les preuves doivent être collectées sans modification de configuration, puis rapprochées de la fenêtre horaire, du workload et de la version de plateforme. Une conclusion professionnelle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans augmenter le risque opérationnel.
+
+### Exercice V5 complémentaire
+
+Analysez le cas suivant : **un backup régulier sans test de restore peut rester inutilisable le jour d’un incident**. Produisez une note courte contenant le symptôme, les objets Exadata concernés, trois preuves read-only, les hypothèses rejetées et la recommandation.
+
+### Corrigé V5 complémentaire
+
+La réponse correcte nomme les objets du module, explique pourquoi les preuves choisies testent l’hypothèse et sépare diagnostic, décision et changement. Elle ne propose pas de modification immédiate si les métriques ne démontrent pas la cause. Elle prévoit également une validation après action, car une correction Exadata doit être prouvée par la disparition du symptôme ou par le retour à un niveau de service attendu.
 
 ## Références officielles
 

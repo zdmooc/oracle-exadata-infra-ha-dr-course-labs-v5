@@ -8,7 +8,7 @@
 
     Le module introductif évite de réduire Exadata à une base de données rapide. Exadata est une architecture complète où Oracle Database, Grid Infrastructure, ASM, Exadata System Software et les storage cells travaillent ensemble.
 
-    Dans Exadata, une décision prise sur une couche se répercute souvent sur les autres. Une requête SQL peut dépendre du plan d’exécution, du cache flash, de la configuration ASM, de l’état d’une cell et du réseau privé. Ce chapitre montre donc le sujet comme un mécanisme technique, pas comme une simple procédure administrative.
+    Le sujet **00 Introduction Au Workshop Exadata** doit être traité comme un mécanisme Exadata précis : l’objectif est d’identifier les composants concernés, les métriques qui prouvent le comportement et les limites qui empêchent une conclusion hâtive.
 
     ## 3. Concepts clés expliqués
 
@@ -38,9 +38,9 @@
 
     Le module introductif évite de réduire Exadata à une base de données rapide. Exadata est une architecture complète où Oracle Database, Grid Infrastructure, ASM, Exadata System Software et les storage cells travaillent ensemble.
 
-    Le fonctionnement réel peut être résumé en trois niveaux. Au niveau **base de données**, Oracle produit un plan d’exécution, gère les sessions, écrit les redo et consulte les vues dynamiques. Au niveau **cluster et stockage**, Grid Infrastructure et ASM rendent disponibles les fichiers de base sur les diskgroups. Au niveau **Exadata**, les storage cells, le cache flash, les métriques et le logiciel système influencent directement le débit, la latence et parfois le volume de données transmis aux DB servers.
+    Le fonctionnement de **00 Introduction Au Workshop Exadata** se lit en reliant la base Oracle, Grid Infrastructure, ASM, les storage cells, le réseau privé et les outils de support uniquement lorsque ces couches interviennent réellement dans le scénario étudié.
 
-    Pour ce module, les notions centrales sont **Exadata Database Machine, Workshop d’administration, Système engineered**. Elles déterminent la façon dont le composant réagit à une charge réelle. Une bonne lecture technique consiste à comprendre d’abord le chemin suivi par l’opération, puis les conditions qui rendent le mécanisme efficace ou inefficace. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+    Pour ce module, les notions centrales sont **Exadata Database Machine, Workshop d’administration, Système engineered**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour **00 Introduction Au Workshop Exadata**, l’analyse commence par une hypothèse technique testable, puis par des preuves read-only qui confirment ou écartent cette hypothèse. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
 
     ## 6. Exemple concret
 

@@ -8,7 +8,7 @@
 
     L’architecture Exadata sépare les rôles : les DB servers exécutent SQL et instances, les storage cells stockent et optimisent les I/O, ASM fournit la couche volume Oracle et le réseau privé transporte les blocs ou résultats filtrés.
 
-    . Une requête SQL peut dépendre du plan d’exécution, du cache flash, de la configuration ASM, de l’état d’une cell et du réseau privé. Ce chapitre montre donc le sujet comme un mécanisme technique, pas comme une simple procédure administrative.
+    L’architecture Exadata est importante parce que les database servers, storage cells, réseau privé, ASM et outils de supervision forment un système intégré. Une panne ou une saturation ne s’interprète correctement qu’en replaçant le symptôme dans cette chaîne.
 
     ## 3. Concepts clés expliqués
 
@@ -40,9 +40,9 @@
 
     L’architecture Exadata sépare les rôles : les DB servers exécutent SQL et instances, les storage cells stockent et optimisent les I/O, ASM fournit la couche volume Oracle et le réseau privé transporte les blocs ou résultats filtrés.
 
-    . Au niveau **base de données**, Oracle produit un plan d’exécution, gère les sessions, écrit les redo et consulte les vues dynamiques. Au niveau **cluster et stockage**, Grid Infrastructure et ASM rendent disponibles les fichiers de base sur les diskgroups. Au niveau **Exadata**, les storage cells, le cache flash, les métriques et le logiciel système influencent directement le débit, la latence et parfois le volume de données transmis aux DB servers.
+    Le fonctionnement se lit comme un chemin d’exécution : session SQL, instance RAC, ASM, réseau privé, storage cell, flash ou disque, puis retour des blocs ou résultats filtrés. Cette chaîne explique pourquoi Exadata ne se résume pas à un serveur Oracle plus rapide.
 
-    Pour ce module, les notions centrales sont **RAC, ASM, Interconnect privé**. Elles déterminent la façon dont le composant réagit à une charge réelle. Une bonne lecture technique consiste à comprendre d’abord le chemin suivi par l’opération, puis les conditions qui rendent le mécanisme efficace ou inefficace. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+    Pour ce module, les notions centrales sont **RAC, ASM, Interconnect privé**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour l’architecture, l’analyse commence par localiser la couche concernée et ses dépendances. Elle sépare calcul, stockage, réseau, cluster et administration afin d’éviter les diagnostics mélangés. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
 
     ## 6. Exemple concret
 
@@ -115,6 +115,34 @@ select instance_name,status,host_name from gv$instance;
     - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
     ```
 
+
+
+
+## Rectification V5 vérifiable — contenu expert non générique
+
+Cette section constitue la correction V5 visible du module. Elle remplace l’approche répétitive par un raisonnement propre au thème **Architecture intégrée Exadata**. L’objectif n’est pas d’ajouter une phrase de méthode, mais de montrer comment un administrateur Exadata produit une preuve technique exploitable devant une équipe production, architecture ou support.
+
+| Élément expert V5 | Application concrète au module |
+|---|---|
+| Objets à nommer explicitement | database servers, storage cells, réseau RoCE/InfiniBand, ASM, services RAC. |
+| Méthode de diagnostic | localiser le symptôme par couche avant de choisir un outil. |
+| Cas d’école attendu | un SQL lent peut venir d’un plan, d’un offload absent, d’une latence cell ou d’un service RAC mal placé. |
+| Preuve minimale | Une commande ou vue read-only, une métrique datée, un composant identifié et une interprétation liée au risque métier. |
+| Limite de conclusion | Une mesure isolée ne suffit pas ; elle doit être reliée à la période, au workload, à la version Exadata et à l’objectif de service. |
+
+### Raisonnement attendu en situation réelle
+
+Pour **Architecture intégrée Exadata**, le diagnostic commence par une hypothèse précise et réfutable. L’administrateur doit formuler ce qu’il cherche à prouver : saturation, mauvais placement, absence d’offload, contention entre workloads, défaut de redondance, fenêtre de maintenance insuffisante ou frontière de responsabilité cloud. Ensuite, il collecte uniquement des preuves read-only. Cette discipline évite deux erreurs fréquentes : modifier une plateforme stable sans preuve et confondre un symptôme visible avec la cause racine.
+
+Le livrable attendu dans un contexte professionnel est une courte note technique. Elle doit contenir le symptôme, l’heure, les objets Exadata concernés, les commandes utilisées, les résultats observés, l’interprétation et la prochaine action. Si une modification est proposée, elle doit être séparée du diagnostic et rattachée à un runbook, une validation CAB ou une procédure de support Oracle.
+
+### Exercice V5 complémentaire
+
+Rédigez une analyse opérationnelle pour le cas suivant : **un SQL lent peut venir d’un plan, d’un offload absent, d’une latence cell ou d’un service RAC mal placé**. Votre réponse doit citer les objets Exadata concernés, indiquer trois preuves read-only, expliquer ce qui invaliderait votre hypothèse et proposer une recommandation limitée au périmètre du module.
+
+### Corrigé V5 complémentaire
+
+Une bonne réponse identifie d’abord le composant dominant du sujet **Architecture intégrée Exadata**, puis relie les preuves à un impact mesurable. Les trois preuves doivent couvrir au moins deux couches différentes lorsque le sujet l’exige, par exemple base et cell, cluster et réseau, ou cloud et VM cluster. La recommandation est correcte seulement si elle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans créer un risque supérieur au problème initial.
 
 ## Références officielles
 

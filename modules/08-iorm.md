@@ -6,11 +6,11 @@
 
     ## 2. Pourquoi ce sujet est important
 
-    IORM agit lorsque plusieurs workloads se disputent les I/O storage. Il complète Resource Manager : l’un gouverne les ressources Oracle côté base, l’autre influence l’accès aux I/O dans les cells.
+IORM est central dans Exadata dès qu’une même infrastructure héberge plusieurs bases, PDB ou services de criticité différente. Sans gouvernance I/O, un scan décisionnel, une sauvegarde ou un batch de chargement peut occuper les ressources flash et disque au moment où une application OLTP attend une latence stable. IORM donne aux storage cells une politique d’arbitrage explicite afin de protéger les workloads prioritaires sans arrêter les traitements secondaires.
 
-    . Une requête SQL peut dépendre du plan d’exécution, du cache flash, de la configuration ASM, de l’état d’une cell et du réseau privé. Ce chapitre montre donc le sujet comme un mécanisme technique, pas comme une simple procédure administrative.
+Dans une analyse de performance, IORM évite une erreur fréquente : confondre une saturation globale avec une absence de priorisation. Le DBA doit donc vérifier le plan actif, la classification des sessions, les métriques IORM et les attentes `cell%` avant de conclure.
 
-    ## 3. Concepts clés expliqués
+## 3. Concepts clés expliqués
 
     | Concept | Définition claire | Exemple concret |
     |---|---|---|
@@ -36,13 +36,11 @@
 
     ## 5. Fonctionnement détaillé
 
-    IORM agit lorsque plusieurs workloads se disputent les I/O storage. Il complète Resource Manager : l’un gouverne les ressources Oracle côté base, l’autre influence l’accès aux I/O dans les cells.
+IORM intervient dans les storage cells, au moment où les requêtes iDB concurrentes demandent de l’accès flash ou disque. La base Oracle et Database Resource Manager peuvent classer les sessions en consumer groups ; les cells, elles, appliquent le plan IORM pour arbitrer les I/O selon les allocations, priorités ou limites définies. Cette séparation explique pourquoi une configuration cohérente doit aligner DBRM côté database et IORM côté storage.
 
-    . Au niveau **base de données**, Oracle produit un plan d’exécution, gère les sessions, écrit les redo et consulte les vues dynamiques. Au niveau **cluster et stockage**, Grid Infrastructure et ASM rendent disponibles les fichiers de base sur les diskgroups. Au niveau **Exadata**, les storage cells, le cache flash, les métriques et le logiciel système influencent directement le débit, la latence et parfois le volume de données transmis aux DB servers.
+Le diagnostic opérationnel suit quatre preuves. Premièrement, `cellcli -e "list iormplan detail"` confirme le plan chargé dans les cells. Deuxièmement, les vues Resource Manager montrent comment les sessions sont classées. Troisièmement, AWR/ASH et les événements `cell%` décrivent les attentes côté instance. Quatrièmement, les métriques cellule indiquent si une catégorie atteint son plafond ou si la saturation vient d’un autre composant.
 
-    Pour ce module, les notions centrales sont **IORM Plan, Noisy neighbor, Consumer Group**. Elles déterminent la façon dont le composant réagit à une charge réelle. Une bonne lecture technique consiste à comprendre d’abord le chemin suivi par l’opération, puis les conditions qui rendent le mécanisme efficace ou inefficace. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
-
-    ## 6. Exemple concret
+## 6. Exemple concret
 
     Un traitement batch perturbe l’OLTP sur une plateforme consolidée ; le chapitre construit un plan de priorités.
 
@@ -100,9 +98,9 @@ select username,consumer_group from v$session where type=USER;
 
     ## 12. Corrigé de l’exercice
 
-    Une bonne réponse commence par identifier les composants du chapitre : **IORM Plan, Noisy neighbor, Consumer Group**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
+    Une bonne réponse commence par identifier le workload prioritaire, le workload perturbateur, le plan IORM actif et la classification Resource Manager réellement appliquée aux sessions. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
 
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance.  : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
+    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance.  La recommandation attendue propose soit un ajustement DBRM/IORM justifié, soit une correction SQL ou batch si IORM n’est pas la cause principale.
 
     ## 13. Synthèse à retenir
 
@@ -115,6 +113,34 @@ select username,consumer_group from v$session where type=USER;
     - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
     ```
 
+
+
+
+## Rectification V5 vérifiable — contenu expert non générique
+
+Cette section constitue la correction V5 visible du module. Elle remplace l’approche répétitive par un raisonnement propre au thème **IORM**. L’objectif n’est pas d’ajouter une phrase de méthode, mais de montrer comment un administrateur Exadata produit une preuve technique exploitable devant une équipe production, architecture ou support.
+
+| Élément expert V5 | Application concrète au module |
+|---|---|
+| Objets à nommer explicitement | Database Resource Manager, consumer group, IORM plan, métriques cellule, waits cell%. |
+| Méthode de diagnostic | prouver la concurrence I/O avant de modifier une priorité. |
+| Cas d’école attendu | un batch DW doit être limité sans affamer les sauvegardes ni masquer un SQL non sélectif. |
+| Preuve minimale | Une commande ou vue read-only, une métrique datée, un composant identifié et une interprétation liée au risque métier. |
+| Limite de conclusion | Une mesure isolée ne suffit pas ; elle doit être reliée à la période, au workload, à la version Exadata et à l’objectif de service. |
+
+### Raisonnement attendu en situation réelle
+
+Pour **IORM**, le diagnostic commence par une hypothèse précise et réfutable. L’administrateur doit formuler ce qu’il cherche à prouver : saturation, mauvais placement, absence d’offload, contention entre workloads, défaut de redondance, fenêtre de maintenance insuffisante ou frontière de responsabilité cloud. Ensuite, il collecte uniquement des preuves read-only. Cette discipline évite deux erreurs fréquentes : modifier une plateforme stable sans preuve et confondre un symptôme visible avec la cause racine.
+
+Le livrable attendu dans un contexte professionnel est une courte note technique. Elle doit contenir le symptôme, l’heure, les objets Exadata concernés, les commandes utilisées, les résultats observés, l’interprétation et la prochaine action. Si une modification est proposée, elle doit être séparée du diagnostic et rattachée à un runbook, une validation CAB ou une procédure de support Oracle.
+
+### Exercice V5 complémentaire
+
+Rédigez une analyse opérationnelle pour le cas suivant : **un batch DW doit être limité sans affamer les sauvegardes ni masquer un SQL non sélectif**. Votre réponse doit citer les objets Exadata concernés, indiquer trois preuves read-only, expliquer ce qui invaliderait votre hypothèse et proposer une recommandation limitée au périmètre du module.
+
+### Corrigé V5 complémentaire
+
+Une bonne réponse identifie d’abord le composant dominant du sujet **IORM**, puis relie les preuves à un impact mesurable. Les trois preuves doivent couvrir au moins deux couches différentes lorsque le sujet l’exige, par exemple base et cell, cluster et réseau, ou cloud et VM cluster. La recommandation est correcte seulement si elle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans créer un risque supérieur au problème initial.
 
 ## Références officielles
 

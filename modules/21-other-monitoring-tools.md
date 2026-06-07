@@ -8,7 +8,7 @@
 
     Ces outils ne remplacent pas la compréhension technique ; ils accélèrent la détection d’écarts et la préparation d’un dossier support.
 
-    . Une requête SQL peut dépendre du plan d’exécution, du cache flash, de la configuration ASM, de l’état d’une cell et du réseau privé. Ce chapitre montre donc le sujet comme un mécanisme technique, pas comme une simple procédure administrative.
+    Le monitoring Exadata transforme des signaux dispersés en preuve d’exploitation. Il sert à relier un symptôme applicatif aux métriques database, cluster, storage cell, réseau ou support automatisé.
 
     ## 3. Concepts clés expliqués
 
@@ -38,9 +38,9 @@
 
     Ces outils ne remplacent pas la compréhension technique ; ils accélèrent la détection d’écarts et la préparation d’un dossier support.
 
-    . Au niveau **base de données**, Oracle produit un plan d’exécution, gère les sessions, écrit les redo et consulte les vues dynamiques. Au niveau **cluster et stockage**, Grid Infrastructure et ASM rendent disponibles les fichiers de base sur les diskgroups. Au niveau **Exadata**, les storage cells, le cache flash, les métriques et le logiciel système influencent directement le débit, la latence et parfois le volume de données transmis aux DB servers.
+    Le fonctionnement se lit par corrélation temporelle : événement métier, métrique database, état cluster, alerte cell, métrique réseau et rapport d’outil. Le diagnostic valide que les horodatages, instances et composants désignent la même période.
 
-    Pour ce module, les notions centrales sont **AHF, Exachk, TFA**. Elles déterminent la façon dont le composant réagit à une charge réelle. Une bonne lecture technique consiste à comprendre d’abord le chemin suivi par l’opération, puis les conditions qui rendent le mécanisme efficace ou inefficace. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+    Pour ce module, les notions centrales sont **AHF, Exachk, TFA**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour le monitoring, l’analyse commence par la question opérationnelle à résoudre, puis sélectionne les métriques utiles au lieu d’empiler des graphiques sans hypothèse. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
 
     ## 6. Exemple concret
 
@@ -113,6 +113,32 @@ tfactl print status
     - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
     ```
 
+
+
+
+## Rectification V5 vérifiable — contenu expert non générique
+
+Cette section rend visible la finition experte V5 pour **Autres outils de monitoring**. Elle impose un raisonnement lié aux objets réels du thème plutôt qu’une formule répétée entre modules.
+
+| Élément expert V5 | Application concrète au module |
+|---|---|
+| Objets à contrôler | AHF, TFA, Exachk, ORAchk, OSWatcher, scripts read-only. |
+| Méthode de diagnostic | choisir l’outil selon la question technique et la preuve attendue. |
+| Cas d’école attendu | TFA collecte vite mais ne remplace pas l’analyse de la chronologie d’incident. |
+| Preuve minimale | Une sortie read-only horodatée, un composant nommé, une métrique interprétée et une conséquence métier. |
+| Limite | Le diagnostic reste invalide si la preuve ne distingue pas charge normale, anomalie transitoire et cause racine. |
+
+### Raisonnement attendu
+
+Pour **Autres outils de monitoring**, l’analyse commence par une question précise. L’administrateur ne cherche pas à appliquer une recette, mais à démontrer ou exclure une hypothèse. Les preuves doivent être collectées sans modification de configuration, puis rapprochées de la fenêtre horaire, du workload et de la version de plateforme. Une conclusion professionnelle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans augmenter le risque opérationnel.
+
+### Exercice V5 complémentaire
+
+Analysez le cas suivant : **TFA collecte vite mais ne remplace pas l’analyse de la chronologie d’incident**. Produisez une note courte contenant le symptôme, les objets Exadata concernés, trois preuves read-only, les hypothèses rejetées et la recommandation.
+
+### Corrigé V5 complémentaire
+
+La réponse correcte nomme les objets du module, explique pourquoi les preuves choisies testent l’hypothèse et sépare diagnostic, décision et changement. Elle ne propose pas de modification immédiate si les métriques ne démontrent pas la cause. Elle prévoit également une validation après action, car une correction Exadata doit être prouvée par la disparition du symptôme ou par le retour à un niveau de service attendu.
 
 ## Références officielles
 

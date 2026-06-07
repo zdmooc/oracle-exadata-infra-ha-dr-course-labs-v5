@@ -8,7 +8,7 @@
 
     Les modèles cloud changent les droits, outils et responsabilités. Le savoir-faire Exadata reste utile, mais l’exploitation passe aussi par OCI, IAM, compartiments et fenêtres de maintenance cloud.
 
-    . Une requête SQL peut dépendre du plan d’exécution, du cache flash, de la configuration ASM, de l’état d’une cell et du réseau privé. Ce chapitre montre donc le sujet comme un mécanisme technique, pas comme une simple procédure administrative.
+    Exadata Cloud Service et Cloud@Customer ajoutent une séparation de responsabilités entre client et Oracle. L’enjeu technique est de savoir quelle couche peut être observée, administrée ou escaladée par chaque acteur.
 
     ## 3. Concepts clés expliqués
 
@@ -38,9 +38,9 @@
 
     Les modèles cloud changent les droits, outils et responsabilités. Le savoir-faire Exadata reste utile, mais l’exploitation passe aussi par OCI, IAM, compartiments et fenêtres de maintenance cloud.
 
-    . Au niveau **base de données**, Oracle produit un plan d’exécution, gère les sessions, écrit les redo et consulte les vues dynamiques. Au niveau **cluster et stockage**, Grid Infrastructure et ASM rendent disponibles les fichiers de base sur les diskgroups. Au niveau **Exadata**, les storage cells, le cache flash, les métriques et le logiciel système influencent directement le débit, la latence et parfois le volume de données transmis aux DB servers.
+    Le fonctionnement se lit par responsabilité : base et schémas, VM cluster, Grid Infrastructure, storage cells, infrastructure cloud, réseau et support. Le diagnostic doit respecter ces frontières.
 
-    Pour ce module, les notions centrales sont **Responsabilité partagée, VM Cluster, IAM OCI**. Elles déterminent la façon dont le composant réagit à une charge réelle. Une bonne lecture technique consiste à comprendre d’abord le chemin suivi par l’opération, puis les conditions qui rendent le mécanisme efficace ou inefficace. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+    Pour ce module, les notions centrales sont **Responsabilité partagée, VM Cluster, IAM OCI**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour Exadata Cloud, l’analyse commence par identifier si le problème relève du tenant, de la VM cluster, du service managé ou de l’infrastructure sous-jacente. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
 
     ## 6. Exemple concret
 
@@ -113,6 +113,34 @@ crsctl stat res -t
     - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
     ```
 
+
+
+
+## Rectification V5 vérifiable — contenu expert non générique
+
+Cette section constitue la correction V5 visible du module. Elle remplace l’approche répétitive par un raisonnement propre au thème **Exadata Cloud et Cloud@Customer**. L’objectif n’est pas d’ajouter une phrase de méthode, mais de montrer comment un administrateur Exadata produit une preuve technique exploitable devant une équipe production, architecture ou support.
+
+| Élément expert V5 | Application concrète au module |
+|---|---|
+| Objets à nommer explicitement | VM cluster, service cloud, responsabilité Oracle/client, OCI, patch orchestration. |
+| Méthode de diagnostic | identifier la frontière d’action avant diagnostic. |
+| Cas d’école attendu | une alerte infrastructure peut relever d’Oracle même si la base est administrée par le client. |
+| Preuve minimale | Une commande ou vue read-only, une métrique datée, un composant identifié et une interprétation liée au risque métier. |
+| Limite de conclusion | Une mesure isolée ne suffit pas ; elle doit être reliée à la période, au workload, à la version Exadata et à l’objectif de service. |
+
+### Raisonnement attendu en situation réelle
+
+Pour **Exadata Cloud et Cloud@Customer**, le diagnostic commence par une hypothèse précise et réfutable. L’administrateur doit formuler ce qu’il cherche à prouver : saturation, mauvais placement, absence d’offload, contention entre workloads, défaut de redondance, fenêtre de maintenance insuffisante ou frontière de responsabilité cloud. Ensuite, il collecte uniquement des preuves read-only. Cette discipline évite deux erreurs fréquentes : modifier une plateforme stable sans preuve et confondre un symptôme visible avec la cause racine.
+
+Le livrable attendu dans un contexte professionnel est une courte note technique. Elle doit contenir le symptôme, l’heure, les objets Exadata concernés, les commandes utilisées, les résultats observés, l’interprétation et la prochaine action. Si une modification est proposée, elle doit être séparée du diagnostic et rattachée à un runbook, une validation CAB ou une procédure de support Oracle.
+
+### Exercice V5 complémentaire
+
+Rédigez une analyse opérationnelle pour le cas suivant : **une alerte infrastructure peut relever d’Oracle même si la base est administrée par le client**. Votre réponse doit citer les objets Exadata concernés, indiquer trois preuves read-only, expliquer ce qui invaliderait votre hypothèse et proposer une recommandation limitée au périmètre du module.
+
+### Corrigé V5 complémentaire
+
+Une bonne réponse identifie d’abord le composant dominant du sujet **Exadata Cloud et Cloud@Customer**, puis relie les preuves à un impact mesurable. Les trois preuves doivent couvrir au moins deux couches différentes lorsque le sujet l’exige, par exemple base et cell, cluster et réseau, ou cloud et VM cluster. La recommandation est correcte seulement si elle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans créer un risque supérieur au problème initial.
 
 ## Références officielles
 

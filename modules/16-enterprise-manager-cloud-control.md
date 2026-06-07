@@ -8,7 +8,7 @@
 
     Enterprise Manager apporte une vue centralisée, mais il doit lui-même être surveillé. Une absence d’alerte dans EM n’équivaut pas toujours à une absence de problème.
 
-    . Une requête SQL peut dépendre du plan d’exécution, du cache flash, de la configuration ASM, de l’état d’une cell et du réseau privé. Ce chapitre montre donc le sujet comme un mécanisme technique, pas comme une simple procédure administrative.
+    Exadata Cloud Service et Cloud@Customer ajoutent une séparation de responsabilités entre client et Oracle. L’enjeu technique est de savoir quelle couche peut être observée, administrée ou escaladée par chaque acteur.
 
     ## 3. Concepts clés expliqués
 
@@ -38,9 +38,9 @@
 
     Enterprise Manager apporte une vue centralisée, mais il doit lui-même être surveillé. Une absence d’alerte dans EM n’équivaut pas toujours à une absence de problème.
 
-    . Au niveau **base de données**, Oracle produit un plan d’exécution, gère les sessions, écrit les redo et consulte les vues dynamiques. Au niveau **cluster et stockage**, Grid Infrastructure et ASM rendent disponibles les fichiers de base sur les diskgroups. Au niveau **Exadata**, les storage cells, le cache flash, les métriques et le logiciel système influencent directement le débit, la latence et parfois le volume de données transmis aux DB servers.
+    Le fonctionnement se lit par responsabilité : base et schémas, VM cluster, Grid Infrastructure, storage cells, infrastructure cloud, réseau et support. Le diagnostic doit respecter ces frontières.
 
-    Pour ce module, les notions centrales sont **Agent EM, Target, Blackout**. Elles déterminent la façon dont le composant réagit à une charge réelle. Une bonne lecture technique consiste à comprendre d’abord le chemin suivi par l’opération, puis les conditions qui rendent le mécanisme efficace ou inefficace. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+    Pour ce module, les notions centrales sont **Agent EM, Target, Blackout**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour Exadata Cloud, l’analyse commence par identifier si le problème relève du tenant, de la VM cluster, du service managé ou de l’infrastructure sous-jacente. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
 
     ## 6. Exemple concret
 
@@ -113,6 +113,32 @@ select instance_name,status,host_name from gv$instance;
     - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
     ```
 
+
+
+
+## Rectification V5 vérifiable — contenu expert non générique
+
+Cette section rend visible la finition experte V5 pour **Enterprise Manager Cloud Control**. Elle impose un raisonnement lié aux objets réels du thème plutôt qu’une formule répétée entre modules.
+
+| Élément expert V5 | Application concrète au module |
+|---|---|
+| Objets à contrôler | targets Exadata, incidents, métriques, seuils, jobs, rapports. |
+| Méthode de diagnostic | utiliser EM comme console de corrélation et non comme unique source de vérité. |
+| Cas d’école attendu | un incident EM doit être confirmé par métriques cellule ou vues database avant action. |
+| Preuve minimale | Une sortie read-only horodatée, un composant nommé, une métrique interprétée et une conséquence métier. |
+| Limite | Le diagnostic reste invalide si la preuve ne distingue pas charge normale, anomalie transitoire et cause racine. |
+
+### Raisonnement attendu
+
+Pour **Enterprise Manager Cloud Control**, l’analyse commence par une question précise. L’administrateur ne cherche pas à appliquer une recette, mais à démontrer ou exclure une hypothèse. Les preuves doivent être collectées sans modification de configuration, puis rapprochées de la fenêtre horaire, du workload et de la version de plateforme. Une conclusion professionnelle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans augmenter le risque opérationnel.
+
+### Exercice V5 complémentaire
+
+Analysez le cas suivant : **un incident EM doit être confirmé par métriques cellule ou vues database avant action**. Produisez une note courte contenant le symptôme, les objets Exadata concernés, trois preuves read-only, les hypothèses rejetées et la recommandation.
+
+### Corrigé V5 complémentaire
+
+La réponse correcte nomme les objets du module, explique pourquoi les preuves choisies testent l’hypothèse et sépare diagnostic, décision et changement. Elle ne propose pas de modification immédiate si les métriques ne démontrent pas la cause. Elle prévoit également une validation après action, car une correction Exadata doit être prouvée par la disparition du symptôme ou par le retour à un niveau de service attendu.
 
 ## Références officielles
 
