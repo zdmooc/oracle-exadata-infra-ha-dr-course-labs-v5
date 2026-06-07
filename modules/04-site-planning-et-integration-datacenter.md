@@ -1,126 +1,622 @@
-    # Module 04 — Site planning et intégration datacenter
+# Module 04 — Site planning et intégration datacenter
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Préparer l’intégration datacenter : alimentation, câblage, réseau, DNS, NTP, sécurité et flux. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module explique comment préparer l’intégration d’un rack Oracle Exadata dans un datacenter.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de comprendre que le succès d’un déploiement Exadata ne commence pas avec Oracle Database, mais avec la préparation des prérequis physiques, réseau, sécurité, DNS, NTP, sauvegarde, supervision et exploitation.
 
-    Avant même la configuration Oracle, Exadata doit entrer correctement dans le datacenter. Les erreurs réseau, DNS, routage ou temps se répercutent ensuite sur RAC, monitoring, backup et support.
+À la fin de ce module, le lecteur doit être capable de :
 
-    Le sujet **04 Site Planning Et Integration Datacenter** doit être traité comme un mécanisme Exadata précis : l’objectif est d’identifier les composants concernés, les métriques qui prouvent le comportement et les limites qui empêchent une conclusion hâtive.
+- identifier les prérequis datacenter d’un rack Exadata ;
+- distinguer alimentation, câblage, réseau, DNS, NTP, sécurité et flux ;
+- comprendre les réseaux client, administration, backup et interne ;
+- expliquer pourquoi DNS direct/inverse et synchronisation temps sont critiques ;
+- préparer une check-list d’intégration ;
+- comprendre les impacts d’une erreur réseau ou datacenter sur RAC, ASM, RMAN, Data Guard et monitoring ;
+- lire les premières vérifications read-only sans modifier l’environnement.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **Plan IP** | Document décrivant adresses client, administration, backup, interconnect et éventuellement réseau cloud. | Une adresse SCAN mal résolue bloque la connexion RAC. |
-| **DNS direct et inverse** | Résolution cohérente des noms vers IP et des IP vers noms, importante pour RAC et outils Oracle. | Une entrée inverse manquante peut compliquer installation et support. |
-| **Synchronisation temps** | Alignement horaire via NTP ou chrony pour clusters, journaux et diagnostics. | Des timestamps incohérents rendent une timeline incident difficile à exploiter. |
+## 2. Pourquoi le site planning est critique
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **Plan IP** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
+Une plateforme Exadata peut être correctement configurée côté Oracle, mais mal fonctionner si l’intégration datacenter est mauvaise.
 
-    ## 4. Architecture concernée
+Les erreurs de préparation peuvent provoquer :
 
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
+```text
+échec d’installation
+problèmes SCAN / listener
+latence réseau
+problèmes RAC
+échec backup RMAN
+supervision incomplète
+problèmes de support Oracle
+chronologie incident incohérente
+difficulté de bascule Data Guard
+```
 
-    Les diagrammes associés au chapitre sont :
+Exadata est un système intégré. Le datacenter doit donc fournir un socle stable :
 
-    - [`reseau-client-admin-backup-interconnect.mmd`](../diagrams/reseau-client-admin-backup-interconnect.mmd)
+```text
+alimentation
+rack / emplacement
+refroidissement
+câblage
+VLAN
+IP
+DNS
+NTP / chrony
+routage
+firewall
+backup
+supervision
+sécurité
+```
 
-    ## 5. Fonctionnement détaillé
+À retenir :
 
-    Avant même la configuration Oracle, Exadata doit entrer correctement dans le datacenter. Les erreurs réseau, DNS, routage ou temps se répercutent ensuite sur RAC, monitoring, backup et support.
+```text
+Avant d’installer Exadata, il faut valider le terrain datacenter.
+Une erreur réseau ou DNS peut devenir plus tard un faux problème Oracle.
+```
 
-    Le fonctionnement de **04 Site Planning Et Integration Datacenter** se lit en reliant la base Oracle, Grid Infrastructure, ASM, les storage cells, le réseau privé et les outils de support uniquement lorsque ces couches interviennent réellement dans le scénario étudié.
+---
 
-    Pour ce module, les notions centrales sont **Plan IP, DNS direct et inverse, Synchronisation temps**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour **04 Site Planning Et Integration Datacenter**, l’analyse commence par une hypothèse technique testable, puis par des preuves read-only qui confirment ou écartent cette hypothèse. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+## 3. Vue d’ensemble de l’intégration datacenter
 
-    ## 6. Exemple concret
+L’intégration Exadata se lit comme une chaîne :
 
-    Le rack est livré mais les VLAN backup ne sont pas prêts ; la fenêtre de mise en production est menacée.
+```text
+Datacenter
+→ rack / alimentation / refroidissement
+→ câblage
+→ réseaux client / admin / backup / interne
+→ DNS / NTP / routage / firewall
+→ configuration initiale
+→ Oracle Grid Infrastructure / ASM / Database
+→ monitoring / backup / support
+```
 
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
+Schéma logique :
 
-    ## 7. Commandes, vues et métriques utiles
+```mermaid
+flowchart LR
+    DC[Datacenter] --> POWER[Alimentation / PDU]
+    DC --> COOL[Refroidissement]
+    DC --> RACK[Emplacement rack]
+    RACK --> CABLING[Câblage]
+    CABLING --> NET[Réseaux]
+    NET --> CLIENT[Réseau client]
+    NET --> ADMIN[Réseau admin]
+    NET --> BACKUP[Réseau backup]
+    NET --> INTERNAL[Réseau interne RoCE / InfiniBand]
+    NET --> DNS[DNS direct / inverse]
+    NET --> NTP[NTP / Chrony]
+    NET --> FW[Firewall / Routage]
+    DNS --> OEDA[Configuration OEDA]
+    NTP --> GI[Grid Infrastructure]
+    FW --> RMAN[RMAN / Monitoring / Support]
+```
 
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
+---
 
-    ```bash
-    crsctl stat res -t
-srvctl status database -d <db_unique_name> -v
-select instance_name,status,host_name from gv$instance;
-    ```
+## 4. Composants physiques à préparer
 
-    | Élément à lire | Interprétation |
-    |---|---|
-    | Plan IP | Cette information indique comment le mécanisme Plan IP se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| DNS direct et inverse | Cette information indique comment le mécanisme DNS direct et inverse se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Synchronisation temps | Cette information indique comment le mécanisme Synchronisation temps se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
+| Composant | Ce qu’il faut préparer | Risque si mal préparé |
+|---|---|---|
+| Rack Exadata | Emplacement, poids, accès, contraintes datacenter | Livraison impossible ou exploitation difficile |
+| Alimentation | PDU, redondance électrique, circuits séparés | Perte de résilience électrique |
+| Refroidissement | Capacité de refroidissement, flux air chaud/froid | Surchauffe, alertes matérielles |
+| Câblage | Client, admin, backup, interconnect si nécessaire | Erreurs de connectivité |
+| Switchs datacenter | VLAN, ports, trunk/access, MTU, routage | Latence, paquets perdus, réseau indisponible |
+| Serveurs DNS | Résolution directe et inverse | Problèmes SCAN, installation, support |
+| Serveurs NTP/Chrony | Synchronisation temps | Logs incohérents, problèmes cluster |
+| Firewall | Flux applicatifs, admin, backup, monitoring, support | Connexion bloquée ou supervision incomplète |
+| Infrastructure backup | Cible RMAN, ZDLRA, média manager, réseau backup | Sauvegarde lente ou impossible |
+| Supervision | EM, agents, SNMP, alerting, journaux | Incidents non détectés |
 
-    ## 8. Interprétation des résultats
+---
 
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
+## 5. Les réseaux Exadata
 
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
+Une plateforme Exadata distingue plusieurs réseaux.
 
-    ## 9. Erreurs fréquentes
+| Réseau | Fonction | Exemple de flux |
+|---|---|---|
+| Client | Connexions applicatives vers Oracle | Applications → SCAN / listeners |
+| Administration | Exploitation et gestion | SSH, EM agent, supervision, accès admin |
+| Backup | Sauvegarde et restauration | RMAN vers ZDLRA, NFS, appliance ou média manager |
+| Interne RoCE / InfiniBand | Communication interne Exadata | RAC, ASM, iDB entre DB servers et Storage Cells |
+| Data Guard | Transport redo vers standby | Primary → Standby |
+| Support / monitoring | Diagnostic et remontée d’état | AHF, Exachk, TFA, ASR, Enterprise Manager |
 
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
+Le réseau interne RoCE / InfiniBand est particulier : il est au cœur de la communication entre Database Servers et Storage Cells.
 
-    ## 10. Bonnes pratiques
+Il transporte :
 
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
+```text
+trafic RAC
+trafic ASM
+protocole iDB
+demandes I/O vers Storage Cells
+retour des blocs ou résultats filtrés
+```
 
-    ## 11. Exercice pratique
+---
 
-    Vous êtes responsable du sujet **Site planning et intégration datacenter** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
+## 6. Plan IP
 
-    > Le rack est livré mais les VLAN backup ne sont pas prêts ; la fenêtre de mise en production est menacée.
+Le plan IP est un document central.
 
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
+Il doit préciser :
 
-    ## 12. Corrigé de l’exercice
+```text
+noms des Database Servers
+noms des Storage Cells
+adresses client
+adresses administration
+adresses backup
+adresses SCAN
+VIP RAC
+adresses internes si nécessaires
+passerelles
+masques
+VLAN
+routes
+DNS direct et inverse
+```
 
-    Une bonne réponse commence par identifier les composants du chapitre : **Plan IP, DNS direct et inverse, Synchronisation temps**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
+Exemple de tableau à préparer :
 
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance. La recommandation finale doit rester proportionnée : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
+| Élément | Nom | IP | Réseau | VLAN | Usage |
+|---|---|---|---|---|---|
+| DB Server 1 | exa-db01 | x.x.x.x | client | VLAN_CLIENT | Connexions applicatives |
+| DB Server 1 admin | exa-db01-mgmt | x.x.x.x | admin | VLAN_ADMIN | Administration |
+| SCAN 1 | exa-scan01 | x.x.x.x | client | VLAN_CLIENT | Connexion RAC |
+| Storage Cell 1 | exa-cell01 | x.x.x.x | admin/interne | selon design | CellCLI / Exadata |
+| Backup | exa-db01-bkp | x.x.x.x | backup | VLAN_BACKUP | RMAN |
 
-    ## 13. Synthèse à retenir
+À retenir :
 
-    ```text
-    À retenir
-    - Site planning et intégration datacenter fait partie d’un ensemble Exadata intégré : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : Plan IP, DNS direct et inverse, Synchronisation temps.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
+```text
+Une incohérence IP/DNS peut bloquer l’installation ou créer des incidents complexes.
+```
 
+---
 
-## Références officielles
+## 7. DNS direct et inverse
+
+Le DNS est critique pour Exadata, RAC et les outils Oracle.
+
+### 7.1 DNS direct
+
+DNS direct :
+
+```text
+nom → adresse IP
+```
+
+Exemple :
+
+```text
+exa-scan01.domaine.local → 10.10.10.21
+```
+
+### 7.2 DNS inverse
+
+DNS inverse :
+
+```text
+adresse IP → nom
+```
+
+Exemple :
+
+```text
+10.10.10.21 → exa-scan01.domaine.local
+```
+
+### 7.3 Pourquoi c’est important
+
+Un problème DNS peut provoquer :
+
+```text
+échec d’installation Grid Infrastructure
+problème SCAN
+problème listener
+connexion lente ou impossible
+erreur de validation OEDA/OECA
+diagnostic support incomplet
+```
+
+### 7.4 Vérifications read-only
+
+```bash
+nslookup exa-scan01.domaine.local
+nslookup 10.10.10.21
+dig exa-scan01.domaine.local
+dig -x 10.10.10.21
+getent hosts exa-scan01.domaine.local
+```
+
+---
+
+## 8. NTP / Chrony et synchronisation temps
+
+La synchronisation temps est indispensable.
+
+Exadata, RAC, Data Guard, monitoring et support dépendent de timestamps cohérents.
+
+### Risques si le temps est incohérent
+
+```text
+logs impossibles à corréler
+timeline incident fausse
+problèmes de cluster
+diagnostic Data Guard difficile
+écart entre événements database, OS, cell et monitoring
+```
+
+### Vérifications read-only
+
+```bash
+timedatectl
+chronyc tracking
+chronyc sources -v
+ntpq -p
+date
+```
+
+### Règle
+
+```text
+Tous les composants doivent utiliser une source temps fiable et cohérente.
+```
+
+---
+
+## 9. Firewall et flux à prévoir
+
+Les flux doivent être préparés avant l’installation.
+
+| Flux | Sens | Pourquoi |
+|---|---|---|
+| Application → SCAN/listeners | Entrant vers Exadata | Connexions SQL |
+| DBA/Admin → DB servers | Entrant admin | SSH, exploitation |
+| EM → agents | Supervision | Monitoring Oracle |
+| DB servers → backup target | Sortant backup | RMAN, ZDLRA, média manager |
+| DB primary → standby | Sortant DR | Data Guard redo transport |
+| DB servers / cells → support tools | Selon politique | AHF, ASR, collecte support |
+| NTP/DNS | Sortant/infrastructure | Temps et résolution |
+
+Une règle firewall manquante peut donner l’impression d’un problème Oracle alors que la cause est réseau.
+
+---
+
+## 10. Backup, ZDLRA et réseau backup
+
+Le réseau backup doit être prévu dès le site planning.
+
+Il peut servir à :
+
+```text
+RMAN vers disque
+RMAN vers ZDLRA
+RMAN vers média manager
+restauration
+validation de sauvegarde
+duplication
+```
+
+### ZDLRA
+
+ZDLRA, ou Zero Data Loss Recovery Appliance, est une appliance Oracle de sauvegarde/recovery.
+
+Elle n’est pas une Storage Cell Exadata.
+
+Elle se place comme cible de sauvegarde/recovery :
+
+```text
+Exadata Database
+→ RMAN / redo
+→ ZDLRA
+→ restauration / recovery
+```
+
+### Points à prévoir
+
+```text
+débit réseau backup
+fenêtre de sauvegarde
+routage vers ZDLRA ou cible backup
+firewall
+nom DNS cible
+authentification
+stratégie de restauration
+tests restore validate
+```
+
+---
+
+## 11. Data Guard et réseau DR
+
+Data Guard doit être pensé dès l’intégration réseau.
+
+Il transporte les redo de la base primaire vers la standby.
+
+```text
+Base primaire Exadata
+→ redo transport
+→ réseau DR
+→ base standby
+```
+
+Active Data Guard permet en plus d’ouvrir la standby en lecture pendant que la réplication continue.
+
+### Points à prévoir
+
+```text
+IP / DNS de la standby
+ports listener
+latence réseau intersite
+débit redo
+routage
+firewall
+mode de protection
+RPO / RTO
+surveillance du lag
+```
+
+### Vérifications read-only côté base
+
+```sql
+select database_role, open_mode, protection_mode, switchover_status
+from v$database;
+
+select name, value, unit
+from v$dataguard_stats;
+```
+
+---
+
+## 12. Sécurité et accès
+
+La sécurité doit être cadrée avant l’exploitation.
+
+À prévoir :
+
+```text
+comptes d’administration
+bastion ou rebond
+SSH
+rotation des clés
+séparation des rôles DBA / système / réseau
+accès CellCLI
+accès Enterprise Manager
+journalisation
+durcissement OS selon politique
+accès support Oracle selon règles internes
+```
+
+Un accès mal défini peut bloquer un incident critique.
+
+---
+
+## 13. Supervision et support
+
+La supervision doit couvrir plusieurs couches :
+
+```text
+Database Servers
+Storage Cells
+ASM
+Grid Infrastructure
+réseau
+flash / disques
+backup
+Data Guard
+OS
+firmware
+alertes Oracle
+```
+
+Outils possibles :
+
+```text
+Enterprise Manager Cloud Control
+CellCLI
+AHF
+Exachk
+ORAchk
+TFA
+OSWatcher
+ASR
+AWR / ASH
+journaux OS
+```
+
+À retenir :
+
+```text
+Superviser uniquement Oracle Database ne suffit pas.
+Il faut superviser l’ensemble Exadata.
+```
+
+---
+
+## 14. Check-list d’intégration datacenter
+
+| Domaine | Question de contrôle |
+|---|---|
+| Rack | Emplacement, poids, accès et contraintes validés ? |
+| Alimentation | Redondance électrique validée ? |
+| Refroidissement | Capacité thermique suffisante ? |
+| Réseau client | VLAN, IP, SCAN et listeners validés ? |
+| Réseau admin | SSH, supervision, accès exploitation validés ? |
+| Réseau backup | Débit et cible backup validés ? |
+| DNS | Direct et inverse cohérents ? |
+| NTP/Chrony | Source temps commune validée ? |
+| Firewall | Flux applicatifs, admin, backup, DR, supervision ouverts ? |
+| Data Guard | Réseau DR, latence et débit redo validés ? |
+| ZDLRA / backup | Cible, routage et tests restore prévus ? |
+| Monitoring | EM, AHF, Exachk, alerting prévus ? |
+| Sécurité | Accès, rôles, bastion et journalisation validés ? |
+| Documentation | Worksheet, plan IP, flux et contacts disponibles ? |
+
+---
+
+## 15. Commandes read-only utiles
+
+### Réseau
+
+```bash
+ip addr
+ip route
+ping <gateway>
+ping <scan_name>
+traceroute <target>
+ss -tulpen
+```
+
+### DNS
+
+```bash
+nslookup <hostname>
+nslookup <ip>
+dig <hostname>
+dig -x <ip>
+getent hosts <hostname>
+```
+
+### Temps
+
+```bash
+timedatectl
+chronyc tracking
+chronyc sources -v
+date
+```
+
+### Cluster
+
+```bash
+crsctl stat res -t
+olsnodes -n
+srvctl config scan
+srvctl status scan
+srvctl status listener
+```
+
+### Storage Cells
+
+```bash
+cellcli -e "list cell detail"
+cellcli -e "list alert history"
+```
+
+### Backup / Data Guard
+
+```sql
+select database_role, open_mode, protection_mode
+from v$database;
+
+select name, value, unit
+from v$dataguard_stats;
+```
+
+---
+
+## 16. Erreurs fréquentes
+
+| Erreur | Conséquence | Correction |
+|---|---|---|
+| DNS inverse absent | Installation ou diagnostic difficile | Valider direct et inverse |
+| NTP non synchronisé | Logs incohérents, suspicion cluster | Vérifier chrony/NTP avant déploiement |
+| VLAN backup oublié | Sauvegardes lentes ou impossibles | Prévoir réseau backup dédié |
+| Flux Data Guard non ouverts | Redo transport bloqué | Valider ports, routage et firewall |
+| Supervision limitée à la base | Incidents cells ou réseau non vus | Superviser DB, cells, ASM, réseau |
+| Plan IP incomplet | Confusion installation/exploitation | Maintenir worksheet validée |
+| Oublier ZDLRA | Backup/recovery non anticipé | Prévoir cible, débit, tests restore |
+| Mélanger admin et client | Risque sécurité/exploitation | Séparer les réseaux selon design |
+
+---
+
+## 17. Exercice pratique
+
+Un rack Exadata doit être intégré dans un datacenter.
+
+La date de mise en production est proche, mais l’équipe découvre que :
+
+```text
+les VLAN backup ne sont pas prêts
+le DNS inverse n’est pas complet
+le firewall Data Guard n’est pas ouvert
+la supervision Enterprise Manager n’est pas encore validée
+```
+
+Répondez aux questions :
+
+1. Quels risques ces problèmes créent-ils ?
+2. Quel impact possible sur RAC, RMAN, Data Guard et monitoring ?
+3. Quelles vérifications read-only lancer ?
+4. Quels documents doivent être mis à jour ?
+5. Quelle recommandation formuler avant mise en production ?
+
+---
+
+## 18. Corrigé indicatif
+
+Les VLAN backup non prêts peuvent bloquer ou ralentir RMAN, ZDLRA, restauration et validation de sauvegarde.
+
+Le DNS inverse incomplet peut perturber l’installation, les vérifications Oracle, SCAN, listeners ou les diagnostics support.
+
+Le firewall Data Guard non ouvert peut bloquer le transport redo vers la standby, donc augmenter le risque RPO/RTO.
+
+La supervision non validée peut empêcher la détection rapide des alertes database, cells, ASM, réseau ou backup.
+
+Vérifications utiles :
+
+```bash
+nslookup <hostname>
+nslookup <ip>
+chronyc tracking
+ip route
+ping <gateway>
+srvctl status scan
+crsctl stat res -t
+```
+
+Recommandation prudente :
+
+```text
+Ne pas valider la mise en production tant que les prérequis réseau, DNS,
+backup, Data Guard et supervision ne sont pas contrôlés et documentés.
+```
+
+---
+
+## 19. À retenir
+
+```text
+À retenir
+- Le site planning prépare le terrain avant Oracle Database.
+- Exadata dépend fortement de l’intégration datacenter.
+- Les réseaux client, admin, backup, interne et DR doivent être séparés et validés.
+- DNS direct/inverse et NTP/chrony sont critiques.
+- Data Guard et ZDLRA doivent être prévus dès le design réseau.
+- Une erreur datacenter peut apparaître plus tard comme un faux problème Oracle.
+- La mise en production doit attendre la validation des prérequis.
+```
+
+---
+
+## 20. Références officielles
 
 | Référence | Utilisation dans le module |
 |---|---|
-| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
-| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Administration Exadata, Storage Server, CellCLI, maintenance et monitoring. |
-| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
-| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
-| [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
-
+| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Installation, administration, réseau, monitoring et maintenance Exadata. |
+| [Oracle Exadata Database Machine Owner's Guide](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Contraintes physiques, rack, alimentation, datacenter. |
+| [Oracle Grid Infrastructure Documentation](https://docs.oracle.com/en/database/) | SCAN, cluster, réseau, DNS, ressources RAC. |
+| [Oracle Data Guard Documentation](https://docs.oracle.com/en/database/) | Réplication, redo transport, standby, switchover/failover. |
+| [Oracle Zero Data Loss Recovery Appliance Documentation](https://docs.oracle.com/en/engineered-systems/zero-data-loss-recovery-appliance/) | ZDLRA, backup, recovery et intégration RMAN. |
