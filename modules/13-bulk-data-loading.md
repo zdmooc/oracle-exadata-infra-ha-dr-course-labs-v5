@@ -1,215 +1,818 @@
-    # Module 13 — Bulk Data Loading
+# Module 13 — Bulk Data Loading
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Maîtriser le chargement massif : staging, external tables, SQL Loader, Data Pump, direct path, contraintes et statistiques. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module explique le **chargement massif de données** sur Oracle Exadata.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de comprendre comment charger de gros volumes de données en maîtrisant le débit, l’espace staging, les index, les contraintes, le redo, les statistiques, la reprise sur erreur et l’impact sur les autres workloads.
 
-    Le chargement massif sur Exadata doit tenir compte du débit, de l’espace staging, des index, contraintes, redo, statistiques et possibilité de reprise. La vitesse brute ne suffit pas si la validation échoue.
+À la fin de ce module, le lecteur doit être capable de :
 
-    Le sujet **Read-only : capacité ASM et cellule pendant chargement** doit être traité comme un mécanisme Exadata précis : l’objectif est d’identifier les composants concernés, les métriques qui prouvent le comportement et les limites qui empêchent une conclusion hâtive.
+- expliquer les principales méthodes de chargement massif ;
+- distinguer SQL*Loader, External Tables, Data Pump, direct path et insert select ;
+- comprendre l’impact des index, contraintes et triggers ;
+- anticiper redo, undo, archivelogs, FRA et RECO ;
+- surveiller ASM, DATA, RECO et Storage Cells pendant un chargement ;
+- identifier les fichiers rejetés et les lignes invalides ;
+- préparer un plan de reprise ;
+- vérifier les statistiques après chargement ;
+- éviter de confondre vitesse de chargement et succès métier.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **External Table** | Table Oracle qui lit des fichiers externes comme des lignes relationnelles. | Un fichier CSV livré par un partenaire est exposé puis inséré dans une table cible. |
-| **Direct Path Load** | Chargement qui écrit directement dans les segments en contournant une partie du chemin SQL conventionnel. | SQL Loader direct path accélère une fenêtre de chargement nocturne. |
-| **Bad file / reject table** | Fichier ou table enregistrant les lignes rejetées durant un chargement. | Les lignes au format invalide sont isolées pour correction. |
+## 2. Pourquoi le chargement massif est critique
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **External Table** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
+Un chargement massif peut consommer beaucoup de ressources :
 
-    ## 4. Architecture concernée
+```text
+CPU
+I/O
+réseau
+espace DATA
+espace RECO
+FRA
+redo
+undo
+temp
+parallélisme
+storage cells
+```
 
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
+Il peut aussi perturber :
 
-    Les diagrammes associés au chapitre sont :
+```text
+OLTP
+reporting
+batchs
+sauvegardes
+Data Guard
+IORM
+monitoring
+```
 
-    - [`bulk-data-loading-flow.mmd`](../diagrams/bulk-data-loading-flow.mmd)
+À retenir :
 
-    ## 5. Fonctionnement détaillé
+```text
+Un chargement réussi n’est pas seulement un chargement rapide.
+C’est un chargement contrôlé, vérifié et réversible.
+```
 
-    Le chargement massif sur Exadata doit tenir compte du débit, de l’espace staging, des index, contraintes, redo, statistiques et possibilité de reprise. La vitesse brute ne suffit pas si la validation échoue.
+---
 
-    Le fonctionnement de **Read-only : capacité ASM et cellule pendant chargement** se lit en reliant la base Oracle, Grid Infrastructure, ASM, les storage cells, le réseau privé et les outils de support uniquement lorsque ces couches interviennent réellement dans le scénario étudié.
+## 3. Scénarios typiques
 
-    Pour ce module, les notions centrales sont **External Table, Direct Path Load, Bad file / reject table**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour **Read-only : capacité ASM et cellule pendant chargement**, l’analyse commence par une hypothèse technique testable, puis par des preuves read-only qui confirment ou écartent cette hypothèse. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+Exemples :
 
-    ## 6. Exemple concret
+```text
+chargement quotidien de fichiers partenaires
+migration initiale de données
+reprise historique
+alimentation data warehouse
+chargement de tables de référence
+chargement de plusieurs To avant ouverture applicative
+rechargement après purge ou correction
+```
 
-    Un fichier de 800 Go doit être chargé avant 6h avec contrôle des rejets et possibilité de retour arrière.
+Contraintes possibles :
 
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
+```text
+fenêtre de chargement limitée
+contrôle des rejets
+traçabilité
+rollback
+validation métier
+statistiques à jour
+Data Guard à maintenir
+impact minimal sur production
+```
 
-    ## 7. Commandes, vues et métriques utiles
+---
 
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
+## 4. Méthodes principales
 
-    ```bash
-    select * from dba_external_tables where table_name=&TABLE;
-select owner,index_name,status,degree from dba_indexes where table_name=&TABLE;
-select operation,status,start_time,end_time from dba_optstat_operations order by start_time desc fetch first 20 rows only;
-    ```
+| Méthode | Usage | Points forts | Limites |
+|---|---|---|---|
+| SQL*Loader conventional path | Chargement classique | Simple, contrôlé | Moins rapide |
+| SQL*Loader direct path | Gros volumes | Rapide | Contraintes / index à gérer |
+| External Tables | Lire fichiers comme tables | Souple, SQL natif | Dépend fichiers/directories |
+| Data Pump import | Migration logique | Complet, metadata | Peut être lourd |
+| INSERT /*+ APPEND */ SELECT | Chargement direct path SQL | Simple côté SQL | À contrôler redo/index/stats |
+| CTAS | Création table depuis requête | Rapide pour staging | Requiert espace |
+| Partition Exchange Load | Chargement par partition | Faible impact applicatif | Modèle partitionné requis |
 
-    | Élément à lire | Interprétation |
-    |---|---|
-    | External Table | Cette information indique comment le mécanisme External Table se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Direct Path Load | Cette information indique comment le mécanisme Direct Path Load se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Bad file / reject table | Cette information indique comment le mécanisme Bad file / reject table se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
+---
 
-    ## 8. Interprétation des résultats
+## 5. External Tables
 
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
+### 5.1 Principe
 
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
+Une External Table permet à Oracle de lire un fichier externe comme une table relationnelle.
 
-    ## 9. Erreurs fréquentes
+Exemple logique :
 
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
+```text
+fichier CSV
+→ DIRECTORY Oracle
+→ External Table
+→ SELECT / INSERT vers table cible
+```
 
-    ## 10. Bonnes pratiques
+### 5.2 Usage
 
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
+```text
+fichier partenaire
+staging de données
+contrôle avant insertion
+rejets lisibles
+traitement SQL sur fichier
+```
 
-    ## 11. Exercice pratique
+### 5.3 Avantages
 
-    Vous êtes responsable du sujet **Bulk Data Loading** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
+```text
+pas besoin de charger immédiatement dans une table finale
+contrôle SQL possible avant insertion
+séparation staging / cible
+gestion des bad files
+```
 
-    > Un fichier de 800 Go doit être chargé avant 6h avec contrôle des rejets et possibilité de retour arrière.
+### 5.4 Points de vigilance
 
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
+```text
+droits DIRECTORY
+format fichier
+encodage
+séparateurs
+lignes invalides
+bad file
+log file
+performance du filesystem source
+```
 
-    ## 12. Corrigé de l’exercice
+---
 
-    Une bonne réponse commence par identifier les composants du chapitre : **External Table, Direct Path Load, Bad file / reject table**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
+## 6. SQL*Loader
 
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance.  : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
+SQL*Loader charge des fichiers dans des tables Oracle.
 
-    ## 13. Synthèse à retenir
+Deux modes principaux :
 
-    ```text
-    À retenir
-    - Bulk Data Loading  : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : External Table, Direct Path Load, Bad file / reject table.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
+```text
+conventional path
+direct path
+```
 
+### 6.1 Conventional Path
 
+```text
+passe par le moteur SQL classique
+respecte plus naturellement les mécanismes standards
+moins rapide sur très gros volumes
+```
 
+### 6.2 Direct Path
 
-## Rectification V5 vérifiable — contenu expert non générique
+```text
+écrit plus directement dans les segments
+réduit certains chemins SQL
+peut être beaucoup plus rapide
+nécessite de maîtriser index, contraintes et redo
+```
 
-Cette section rend visible la finition experte V5 pour **Chargement massif**. Elle impose un raisonnement lié aux objets réels du thème plutôt qu’une formule répétée entre modules.
+### 6.3 Fichiers importants
 
-| Élément expert V5 | Application concrète au module |
-|---|---|
-| Objets à contrôler | SQL Loader, external tables, direct path, indexes, statistiques, redo, NOLOGGING contrôlé. |
-| Méthode de diagnostic | optimiser le débit sans perdre la récupérabilité ni saturer les cells. |
-| Cas d’école attendu | un chargement direct path rapide doit être suivi d’une stratégie de backup et de validation des statistiques. |
-| Preuve minimale | Une sortie read-only horodatée, un composant nommé, une métrique interprétée et une conséquence métier. |
-| Limite | Le diagnostic reste invalide si la preuve ne distingue pas charge normale, anomalie transitoire et cause racine. |
+```text
+control file
+data file
+log file
+bad file
+discard file
+```
 
-### Raisonnement attendu
+À retenir :
 
-Pour **Chargement massif**, l’analyse commence par une question précise. L’administrateur ne cherche pas à appliquer une recette, mais à démontrer ou exclure une hypothèse. Les preuves doivent être collectées sans modification de configuration, puis rapprochées de la fenêtre horaire, du workload et de la version de plateforme. Une conclusion professionnelle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans augmenter le risque opérationnel.
+```text
+Le bad file n’est pas un détail.
+Il fait partie de la preuve de qualité du chargement.
+```
 
-### Exercice V5 complémentaire
+---
 
-Analysez le cas suivant : **un chargement direct path rapide doit être suivi d’une stratégie de backup et de validation des statistiques**. Produisez une note courte contenant le symptôme, les objets Exadata concernés, trois preuves read-only, les hypothèses rejetées et la recommandation.
+## 7. Data Pump Import
 
-### Corrigé V5 complémentaire
+Data Pump est utile pour charger des données déjà exportées depuis Oracle.
 
-La réponse correcte nomme les objets du module, explique pourquoi les preuves choisies testent l’hypothèse et sépare diagnostic, décision et changement. Elle ne propose pas de modification immédiate si les métriques ne démontrent pas la cause. Elle prévoit également une validation après action, car une correction Exadata doit être prouvée par la disparition du symptôme ou par le retour à un niveau de service attendu.
+Usage :
 
-## Références officielles
+```text
+migration logique
+chargement schéma complet
+chargement tables
+chargement metadata
+transport entre environnements
+```
 
-| Référence | Utilisation dans le module |
-|---|---|
-| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
-| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Administration Exadata, Storage Server, CellCLI, maintenance et monitoring. |
-| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
-| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
-| [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
-## Complément expert V5 — Chargements massifs sur Exadata
+Avantages :
 
-### Explication technique spécifique
+```text
+parallélisme
+metadata
+remap schema
+remap tablespace
+filtrage
+logs détaillés
+```
 
-Le chargement massif sur Exadata doit concilier débit, journalisation, pression flash, impact ASM, redo, undo, statistiques et concurrence I/O. Les méthodes fréquentes sont SQL*Loader direct path, external tables, Data Pump, `insert /*+ append */`, transportable tablespaces et chargements parallèles. Exadata accélère certains flux grâce à la bande passante stockage, au parallélisme et à la flash, mais un chargement mal gouverné peut saturer RECO avec les archivelogs, provoquer des waits I/O, perturber IORM ou déclencher des rebalances si la capacité est mal anticipée.[^v5-sqlloader]
+Points de vigilance :
 
-Un chargement expert sépare la phase d’ingestion, la phase de validation, la phase de statistiques et la phase de mise à disposition. Les tables de staging peuvent recevoir les données avec contraintes différées, puis les partitions peuvent être échangées vers la table cible. Pour les très gros volumes, le partition exchange load réduit la durée de verrouillage sur la table finale. La question n’est pas seulement “comment charger vite”, mais “comment charger vite sans casser la fenêtre de production ni saturer les couches Exadata”.
+```text
+taille dump
+emplacement DIRECTORY
+parallélisme
+index
+contraintes
+objets invalides
+statistiques
+tablespaces cible
+```
+
+---
+
+## 8. Direct Path et APPEND
+
+`INSERT /*+ APPEND */` peut utiliser un chargement direct path.
+
+Exemple :
+
+```sql
+insert /*+ append */ into sales_target
+select *
+from sales_staging;
+```
+
+Intérêt :
+
+```text
+chargement rapide
+utile pour tables de staging ou partitions
+peut limiter certains chemins classiques
+```
+
+Points de vigilance :
+
+```text
+verrouillage segment/table selon cas
+redo/undo selon configuration
+index à maintenir
+statistiques à recalculer
+commit à gérer
+espace disponible
+```
+
+---
+
+## 9. Partition Exchange Load
+
+Partition Exchange Load consiste à charger les données dans une table de staging, puis à échanger cette table avec une partition.
+
+Schéma :
+
+```text
+1. Charger table STG_SALES_202601
+2. Contrôler les données
+3. Créer / vérifier index
+4. Échanger avec partition SALES_202601
+5. Valider statistiques
+```
+
+Avantages :
+
+```text
+faible interruption applicative
+contrôle avant publication
+adapté aux gros volumes périodiques
+bon modèle data warehouse
+```
+
+Limites :
+
+```text
+nécessite table partitionnée
+structures compatibles
+contraintes à respecter
+processus plus complexe
+```
+
+---
+
+## 10. Index, contraintes et triggers
+
+Les index, contraintes et triggers peuvent fortement impacter le chargement.
+
+### 10.1 Index
+
+Pendant un chargement massif :
+
+```text
+maintenir les index peut ralentir le chargement
+reconstruire après peut être plus efficace selon cas
+les index locaux/globaux changent la stratégie
+```
+
+### 10.2 Contraintes
+
+Contraintes à contrôler :
+
+```text
+primary key
+unique
+foreign key
+check
+not null
+```
+
+Stratégies possibles :
+
+```text
+valider avant chargement
+charger en staging
+activer/valider après contrôle
+utiliser exceptions table selon procédure
+```
+
+### 10.3 Triggers
+
+Les triggers peuvent :
+
+```text
+ralentir fortement
+générer des effets de bord
+modifier les données
+ajouter du redo
+```
+
+À retenir :
+
+```text
+On ne désactive jamais index, contraintes ou triggers sans procédure validée.
+```
+
+---
+
+## 11. Redo, Undo, Archivelogs, FRA et RECO
+
+Un chargement massif peut produire beaucoup de redo.
+
+Impacts :
+
+```text
+archivelogs volumineux
+FRA saturée
+RECO rempli
+Data Guard lag
+backup plus long
+réplication impactée
+```
+
+À surveiller :
+
+```sql
+select * from v$recovery_file_dest;
+```
+
+```sql
+select name, total_mb, free_mb, usable_file_mb, type, state
+from v$asm_diskgroup
+order by name;
+```
+
+Si Data Guard existe :
+
+```sql
+select name, value, unit
+from v$dataguard_stats;
+```
+
+À retenir :
+
+```text
+Un chargement massif ne doit pas être validé seulement par le nombre de lignes chargées.
+Il faut vérifier DATA, RECO, archivelogs et Data Guard.
+```
+
+---
+
+## 12. Staging
+
+Le staging est une zone intermédiaire.
+
+Rôle :
+
+```text
+recevoir les fichiers
+contrôler le format
+filtrer les erreurs
+dédupliquer
+valider les règles métier
+préparer l’insertion cible
+```
+
+Architecture logique :
 
 ```mermaid
 flowchart LR
-    SRC[Fichiers source ou dump] --> STG[Staging table]
-    STG --> VALID[Contrôles qualité]
-    VALID --> PEL[Partition Exchange Load]
-    PEL --> TGT[Table cible partitionnée]
-    TGT --> STATS[Stats incrémentales]
-    STG --> REDO[Redo / Archivelogs]
-    REDO --> RECO[Diskgroup RECO]
+    A[Fichier source] --> B[Staging filesystem / object storage]
+    B --> C[External Table ou SQL*Loader]
+    C --> D[Table staging]
+    D --> E[Contrôles techniques]
+    E --> F[Contrôles métier]
+    F --> G[Table cible]
+    G --> H[Statistiques / validation]
 ```
 
-### Exemple concret réaliste
+---
 
-Une équipe doit charger 800 Go de transactions quotidiennes dans une table partitionnée. Un chargement direct dans la table finale avec index globaux actifs peut générer beaucoup de redo et prolonger les verrous. Une approche plus robuste consiste à charger en staging avec direct path, contrôler les rejets, créer ou maintenir les index locaux, collecter les statistiques sur la partition, puis effectuer un exchange partition. Pendant l’opération, le DBA suit RECO, les waits `direct path write`, `log file sync`, les métriques cellule et la consommation CPU des database servers.
+## 13. Qualité des données et rejets
 
-### Comment raisonner
+Un chargement massif doit traiter les anomalies.
 
-Le raisonnement commence par le contrat de service : fenêtre disponible, volume, taux d’erreurs attendu, possibilité de rejouer, niveau de journalisation exigé et impact acceptable. Ensuite, on choisit la méthode : SQL*Loader pour fichiers plats, external tables pour SQL sur fichiers, Data Pump pour export/import Oracle, direct path insert pour transformations SQL, transportable tablespaces pour déplacement massif de segments. Enfin, on prépare la surveillance : DATA, RECO, archivelogs, parallélisme, stats et IORM.
+À prévoir :
 
-### Commandes / vues utiles
+```text
+bad file
+discard file
+reject table
+logs SQL*Loader
+logs Data Pump
+contrôle nombre lignes attendues / chargées
+contrôle doublons
+contrôle formats
+contrôle clés
+contrôle dates
+contrôle montants
+```
+
+Exemple de contrôle :
 
 ```sql
--- Read-only : suivre sessions de chargement et waits
-select sid, serial#, program, event, state, wait_class from v$session where program like '%sqlldr%' or module like '%Data Pump%';
-select name, value from v$sysstat where name in ('redo size','physical writes direct','physical reads direct');
-select tablespace_name, bytes/1024/1024 mb from dba_data_files fetch first 20 rows only;
-select table_name, partition_name, num_rows, blocks, last_analyzed from dba_tab_partitions where table_name = 'SALES';
+select count(*) from table_staging;
+select count(*) from table_cible;
+select count(*) from table_rejets;
+```
+
+---
+
+## 14. Statistiques après chargement
+
+Après chargement massif, les statistiques peuvent être obsolètes.
+
+À vérifier :
+
+```text
+statistiques table
+statistiques index
+histogrammes si nécessaires
+partition statistics
+global statistics
+stale stats
+```
+
+Vue utile :
+
+```sql
+select owner, table_name, stale_stats, last_analyzed
+from dba_tab_statistics
+where owner = '<OWNER>'
+order by last_analyzed desc;
+```
+
+Opération possible selon procédure :
+
+```sql
+exec dbms_stats.gather_table_stats('<OWNER>', '<TABLE_NAME>');
+```
+
+Attention :
+
+```text
+Dans ce module, les commandes de modification sont données comme exemples conceptuels.
+En production, elles exigent procédure, fenêtre et validation.
+```
+
+---
+
+## 15. Exadata : ce qui change
+
+Exadata peut aider par :
+
+```text
+débit élevé
+Smart Scan pour contrôles et lectures
+Flash Cache selon profil
+I/O parallèle
+Storage Cells
+réseau interne rapide
+ASM
+IORM si concurrence
+```
+
+Mais Exadata ne corrige pas :
+
+```text
+fichier mal formé
+clés en doublon
+tablespace insuffisant
+FRA saturée
+index mal conçus
+contraintes incohérentes
+statistiques absentes
+plan de reprise inexistant
+```
+
+---
+
+## 16. Monitoring pendant chargement
+
+À surveiller :
+
+```text
+nombre de lignes chargées
+débit
+rejets
+erreurs
+temps par étape
+DATA
+RECO
+FRA
+TEMP
+UNDO
+archivelogs
+Data Guard lag
+wait events
+cell metrics
+IORM
+```
+
+Commandes read-only :
+
+```sql
+select * from v$recovery_file_dest;
+```
+
+```sql
+select name, total_mb, free_mb, usable_file_mb, type, state
+from v$asm_diskgroup
+order by name;
+```
+
+```sql
+select event, total_waits, time_waited
+from v$system_event
+where event like 'cell%'
+order by time_waited desc;
 ```
 
 ```bash
-# Read-only : capacité ASM et cellule pendant chargement
-asmcmd lsdg
-cellcli -e "list metriccurrent where name like 'CD_IO%' attributes name,metricValue,objectName"
+cellcli -e "list metriccurrent"
+cellcli -e "list alert history"
 ```
 
-### Comment interpréter
+---
 
-Une hausse de `redo size` est normale si le chargement est journalisé ; elle devient problématique si RECO approche de la saturation ou si l’archivage ne suit plus. Les waits `direct path write` indiquent l’écriture directe des segments ; leur durée doit être analysée avec la charge cellule. Les index globaux peuvent transformer un chargement séquentiel en maintenance coûteuse. Les statistiques absentes après chargement peuvent produire de mauvais plans malgré un chargement réussi.
+## 17. Plan de reprise
 
-### Exercice pratique
+Un chargement massif doit avoir un plan de reprise.
 
-On doit charger 800 Go en deux heures dans une table partitionnée utilisée le lendemain matin. Propose une stratégie Exadata et explique pourquoi elle limite le risque.
+Questions :
 
-### Corrigé détaillé
+```text
+Peut-on relancer le chargement ?
+Le chargement est-il idempotent ?
+Faut-il purger la table cible ?
+Les rejets sont-ils isolés ?
+Peut-on reprendre au fichier suivant ?
+Le batch sait-il éviter les doublons ?
+Le rollback est-il possible ?
+La source est-elle conservée ?
+```
 
-Une stratégie robuste consiste à charger en staging avec direct path et parallélisme contrôlé, vérifier les rejets, collecter des statistiques sur les données chargées, puis utiliser partition exchange load vers la table cible. Il faut surveiller DATA, RECO, archivelogs, waits direct path et métriques cellule. Si la base est en production, IORM ou DBRM peut limiter l’impact sur les workloads critiques. Le corrigé est correct parce qu’il traite le chargement comme un processus complet : ingestion, validation, bascule, statistiques et surveillance, au lieu de se limiter à une commande rapide.
+Stratégies :
 
-### Limites et pièges
+```text
+staging persistant
+table de contrôle
+batch_id
+fichier de suivi
+commit par lot
+partition exchange
+sauvegarde avant chargement
+```
 
-Le mode NOLOGGING peut être tentant mais il a des implications de récupération et de Data Guard ; il doit respecter les règles de protection de l’entreprise. Un parallélisme trop élevé peut saturer CPU, I/O ou redo. Un exchange partition sans statistiques peut créer une régression le lendemain. Un chargement réussi techniquement mais non contrôlé fonctionnellement reste un échec opérationnel.
+---
 
-### À retenir
+## 18. Méthode de chargement contrôlé
 
-Sur Exadata, un chargement massif performant est un compromis maîtrisé entre débit, redo, capacité RECO, parallélisme, index, statistiques et protection des workloads concurrents.
+Méthode recommandée :
 
-[^v5-sqlloader]: Oracle, *Oracle Database Utilities — SQL*Loader and Data Pump*, https://docs.oracle.com/en/database/oracle/oracle-database/19/sutil/
+```text
+1. Définir le périmètre.
+2. Vérifier espace DATA / RECO / FRA.
+3. Vérifier fenêtre de chargement.
+4. Charger en staging.
+5. Contrôler nombre de lignes.
+6. Isoler les rejets.
+7. Charger la cible.
+8. Contrôler index/contraintes.
+9. Collecter statistiques.
+10. Vérifier Data Guard / backup si concernés.
+11. Valider métier.
+12. Documenter résultat.
+```
+
+---
+
+## 19. Erreurs fréquentes
+
+| Erreur | Pourquoi c’est dangereux | Correction |
+|---|---|---|
+| Charger directement en cible | Risque qualité et rollback | Utiliser staging |
+| Ignorer bad file | Données perdues ou non expliquées | Contrôler rejets |
+| Oublier RECO/FRA | Saturation archivelogs | Vérifier capacité |
+| Oublier Data Guard | Lag ou rupture de synchro | Surveiller apply/transport lag |
+| Garder tous les index sans réflexion | Chargement ralenti | Analyser stratégie index |
+| Désactiver contraintes sans procédure | Données incohérentes | Runbook validé |
+| Oublier stats | Plans SQL dégradés | Collecte stats post-load |
+| Ne pas prévoir reprise | Relance impossible | Plan idempotent |
+
+---
+
+## 20. Commandes read-only utiles
+
+### External Tables
+
+```sql
+select owner, table_name, type_name, default_directory_name
+from dba_external_tables
+order by owner, table_name;
+```
+
+### Index
+
+```sql
+select owner, index_name, table_name, status, degree
+from dba_indexes
+where table_name = '<TABLE_NAME>'
+order by owner, index_name;
+```
+
+### Statistiques
+
+```sql
+select owner, table_name, stale_stats, last_analyzed
+from dba_tab_statistics
+where table_name = '<TABLE_NAME>'
+order by owner, table_name;
+```
+
+### ASM / capacité
+
+```bash
+asmcmd lsdg
+```
+
+```sql
+select name, total_mb, free_mb, usable_file_mb, type, state
+from v$asm_diskgroup
+order by name;
+```
+
+### FRA
+
+```sql
+select * from v$recovery_file_dest;
+```
+
+### Cell metrics
+
+```bash
+cellcli -e "list metriccurrent"
+cellcli -e "list alert history"
+```
+
+---
+
+## 21. Exercice pratique
+
+Un fichier de **800 Go** doit être chargé avant 6h.
+
+Contraintes :
+
+```text
+contrôle des rejets obligatoire
+reprise possible en cas d’erreur
+pas d’impact OLTP en journée
+Data Guard actif
+statistiques obligatoires avant ouverture métier
+```
+
+Répondez :
+
+1. Quelle architecture de chargement proposez-vous ?
+2. Pourquoi utiliser une zone de staging ?
+3. Quels risques sur RECO/FRA et Data Guard ?
+4. Que vérifier côté index et contraintes ?
+5. Quelles commandes read-only utiliser ?
+6. Quelle conclusion prudente formuler ?
+
+---
+
+## 22. Corrigé indicatif
+
+Architecture proposée :
+
+```text
+fichier source
+→ staging
+→ external table ou SQL*Loader
+→ table staging
+→ contrôles techniques
+→ contrôles métier
+→ table cible ou partition exchange
+→ statistiques
+→ validation
+```
+
+Staging utile pour :
+
+```text
+contrôle qualité
+reprise
+isolation des rejets
+éviter corruption logique de la cible
+traçabilité
+```
+
+Risques :
+
+```text
+redo massif
+archivelogs volumineux
+FRA saturée
+RECO rempli
+Data Guard lag
+impact backup
+```
+
+Index et contraintes :
+
+```text
+vérifier index existants
+contrôler contraintes
+éviter désactivation sans procédure
+valider après chargement
+```
+
+Commandes read-only :
+
+```sql
+select * from v$recovery_file_dest;
+select name, total_mb, free_mb, usable_file_mb from v$asm_diskgroup;
+select owner, index_name, status from dba_indexes where table_name = '<TABLE_NAME>';
+select owner, table_name, stale_stats, last_analyzed from dba_tab_statistics where table_name = '<TABLE_NAME>';
+```
+
+Conclusion prudente :
+
+```text
+Le chargement peut être lancé seulement si l’espace DATA/RECO/FRA,
+la stratégie de reprise, le contrôle des rejets, la surveillance Data Guard
+et les statistiques post-load sont prêts et validés.
+```
+
+---
+
+## 23. À retenir
+
+```text
+À retenir
+- Le chargement massif doit être contrôlé, pas seulement rapide.
+- Le staging protège la qualité et la reprise.
+- SQL*Loader, External Tables, Data Pump et direct path répondent à des besoins différents.
+- Les index, contraintes et triggers peuvent dominer le temps de chargement.
+- RECO, FRA, redo et Data Guard doivent être surveillés.
+- Les statistiques post-load sont indispensables.
+- Exadata apporte du débit, mais ne corrige pas une mauvaise méthode.
+- Un chargement sans plan de reprise est un risque production.
+```
+
+---
+
+## 24. Références officielles
+
+| Référence | Utilisation dans le module |
+|---|---|
+| [Oracle Database Utilities Documentation](https://docs.oracle.com/en/database/) | SQL*Loader, Data Pump, External Tables. |
+| [Oracle Database Administrator’s Guide](https://docs.oracle.com/en/database/) | Direct path, contraintes, tablespaces, chargement. |
+| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Storage Cells, métriques, performance Exadata. |
+| [Oracle ASM Documentation](https://docs.oracle.com/en/database/) | DATA, RECO, capacité, diskgroups. |
+| [Oracle Data Guard Documentation](https://docs.oracle.com/en/database/) | Lag, redo transport, impact des chargements. |
