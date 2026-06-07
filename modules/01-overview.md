@@ -2,6 +2,7 @@
 
 ## 1. Objectif du module
 
+
 Ce module donne une vue d’ensemble d’**Oracle Exadata Database Machine**.
 
 L’objectif est de comprendre pourquoi Exadata existe, quels problèmes elle cherche à résoudre, quels composants la composent et en quoi elle diffère d’une architecture Oracle classique basée sur serveurs séparés et stockage SAN/NAS.
