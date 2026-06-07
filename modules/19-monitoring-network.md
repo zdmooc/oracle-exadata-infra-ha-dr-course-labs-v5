@@ -1,224 +1,619 @@
-    # Module 19 — Monitoring Network
+# Module 19 — Monitoring Network
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Comprendre les réseaux Exadata : client, admin, backup, interconnect RoCE/InfiniBand et erreurs interfaces. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module explique comment surveiller les réseaux d’une plateforme Oracle Exadata.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de comprendre qu’Exadata n’utilise pas un seul réseau. Les flux client, administration, backup, Data Guard et réseau interne RoCE/InfiniBand ont des rôles différents, des symptômes différents et des méthodes de diagnostic différentes.
 
-    Le réseau Exadata n’est pas monolithique. Chaque réseau a un rôle, des symptômes et des outils de lecture différents.
+À la fin de ce module, le lecteur doit être capable de :
 
-    Le monitoring Exadata transforme des signaux dispersés en preuve d’exploitation. Il sert à relier un symptôme applicatif aux métriques database, cluster, storage cell, réseau ou support automatisé.
+- distinguer les réseaux Exadata ;
+- relier un symptôme à un type de réseau ;
+- comprendre le rôle du réseau interne RDMA/RoCE/InfiniBand ;
+- diagnostiquer une lenteur backup sans l’attribuer au SQL ;
+- vérifier SCAN, DNS, listeners et services ;
+- identifier les erreurs d’interface ;
+- construire une timeline réseau ;
+- utiliser des commandes read-only adaptées.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **Client network** | Réseau utilisé par applications et utilisateurs pour atteindre les services Oracle. | Une erreur DNS SCAN affecte les connexions clientes. |
-| **Backup network** | Réseau dédié aux flux sauvegarde/restauration ou transfert massif selon architecture. | Une sauvegarde RMAN vers appliance externe utilise ce réseau. |
-| **RDMA fabric** | Réseau privé très faible latence pour échanges DB servers/cells et cluster. | Une erreur fabric peut se manifester en latence I/O ou messages cluster. |
+## 2. Les réseaux Exadata
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **Client network** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
+Réseaux à distinguer :
 
-    ## 4. Architecture concernée
-
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
-
-    Les diagrammes associés au chapitre sont :
-
-    - [`reseau-client-admin-backup-interconnect.mmd`](../diagrams/reseau-client-admin-backup-interconnect.mmd)
-
-    ## 5. Fonctionnement détaillé
-
-    Le réseau Exadata n’est pas monolithique. Chaque réseau a un rôle, des symptômes et des outils de lecture différents.
-
-    Le fonctionnement se lit par corrélation temporelle : événement métier, métrique database, état cluster, alerte cell, métrique réseau et rapport d’outil. Le diagnostic valide que les horodatages, instances et composants désignent la même période.
-
-    Pour ce module, les notions centrales sont **Client network, Backup network, RDMA fabric**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour le monitoring, l’analyse commence par la question opérationnelle à résoudre, puis sélectionne les métriques utiles au lieu d’empiler des graphiques sans hypothèse. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
-
-    ## 6. Exemple concret
-
-    Une sauvegarde ralentit fortement alors que les requêtes OLTP restent correctes ; le réseau backup devient suspect.
-
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
-
-    ## 7. Commandes, vues et métriques utiles
-
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
-
-    ```bash
-    crsctl stat res -t
-cellcli -e "list alerthistory detail"
-tfactl print status
-    ```
-
-    | Élément à lire | Interprétation |
-    |---|---|
-    | Client network | Cette information indique comment le mécanisme Client network se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Backup network | Cette information indique comment le mécanisme Backup network se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| RDMA fabric | Cette information indique comment le mécanisme RDMA fabric se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-
-    ## 8. Interprétation des résultats
-
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
-
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
-
-    ## 9. Erreurs fréquentes
-
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
-
-    ## 10. Bonnes pratiques
-
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
-
-    ## 11. Exercice pratique
-
-    Vous êtes responsable du sujet **Monitoring Network** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
-
-    > Une sauvegarde ralentit fortement alors que les requêtes OLTP restent correctes ; le réseau backup devient suspect.
-
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
-
-    ## 12. Corrigé de l’exercice
-
-    Une bonne réponse commence par identifier les composants du chapitre : **Client network, Backup network, RDMA fabric**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
-
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance.  : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
-
-    ## 13. Synthèse à retenir
-
-    ```text
-    À retenir
-    - Monitoring Network  : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : Client network, Backup network, RDMA fabric.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
-
-
-
-
-## Rectification V5 vérifiable — contenu expert non générique
-
-Cette section rend visible la finition experte V5 pour **Monitoring réseau Exadata**. Elle impose un raisonnement lié aux objets réels du thème plutôt qu’une formule répétée entre modules.
-
-| Élément expert V5 | Application concrète au module |
-|---|---|
-| Objets à contrôler | interfaces, erreurs, drops, bonding, MTU, interconnect, réseau client. |
-| Méthode de diagnostic | corréler erreurs physiques et symptômes database ou cluster. |
-| Cas d’école attendu | des drops sur réseau privé pendant un scan parallèle peuvent apparaître comme latence cell. |
-| Preuve minimale | Une sortie read-only horodatée, un composant nommé, une métrique interprétée et une conséquence métier. |
-| Limite | Le diagnostic reste invalide si la preuve ne distingue pas charge normale, anomalie transitoire et cause racine. |
-
-### Raisonnement attendu
-
-Pour **Monitoring réseau Exadata**, l’analyse commence par une question précise. L’administrateur ne cherche pas à appliquer une recette, mais à démontrer ou exclure une hypothèse. Les preuves doivent être collectées sans modification de configuration, puis rapprochées de la fenêtre horaire, du workload et de la version de plateforme. Une conclusion professionnelle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans augmenter le risque opérationnel.
-
-### Exercice V5 complémentaire
-
-Analysez le cas suivant : **des drops sur réseau privé pendant un scan parallèle peuvent apparaître comme latence cell**. Produisez une note courte contenant le symptôme, les objets Exadata concernés, trois preuves read-only, les hypothèses rejetées et la recommandation.
-
-### Corrigé V5 complémentaire
-
-La réponse correcte nomme les objets du module, explique pourquoi les preuves choisies testent l’hypothèse et sépare diagnostic, décision et changement. Elle ne propose pas de modification immédiate si les métriques ne démontrent pas la cause. Elle prévoit également une validation après action, car une correction Exadata doit être prouvée par la disparition du symptôme ou par le retour à un niveau de service attendu.
-
-## Références officielles
-
-| Référence | Utilisation dans le module |
-|---|---|
-| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
-| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Administration Exadata, Storage Server, CellCLI, maintenance et monitoring. |
-| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
-| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
-| [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
-## Complément expert V5 — Monitoring réseau client, admin, backup et interconnect
-
-### Explication technique spécifique
-
-Le monitoring Exadata ne consiste pas à regarder une seule alerte ou un seul graphe. Pour **les réseaux Exadata**, l’objectif est de rapprocher l’état matériel, l’état logiciel, les métriques courantes et la perception côté base. Une alerte cellule peut être bénigne si elle correspond à une transition attendue, mais elle peut aussi expliquer une hausse de latence observée par les sessions Oracle. La démarche experte consiste à identifier la mesure native, son objet, son horodatage, puis à la comparer avec les waits, les statistiques SQL et l’état ASM. Enterprise Manager apporte une vision centralisée, tandis que `cellcli`, les vues dynamiques et les journaux de diagnostic donnent une preuve locale.[^v5-monitoring]
-
-Pour ce thème, un DBA confirmé doit distinguer **symptôme**, **cause probable** et **preuve observable**. Le symptôme typique est : des timeouts applicatifs alors que la base et les cellules restent up. La cause peut être locale au composant, liée à une saturation, à une opération planifiée ou à une panne partielle. La preuve doit venir d’au moins deux sources indépendantes : métrique cellule et vue base, alerte système et historique Enterprise Manager, ou état ASM et journal Exadata.
-
-| Indicateur | Ce qu’il mesure | Interprétation experte |
-|---|---|---|
-| `Interface errors` | Erreurs RX/TX | Indique pertes ou défaut de lien |
-| `gc cr block receive time` | Temps de réception RAC | Sensible à l’interconnect |
-| `backup throughput` | Débit sauvegarde | Aide à isoler saturation réseau backup |
-
-```mermaid
-flowchart LR
-    CLIENT[Réseau client] --> DB[DB servers]
-    ADMIN[Réseau admin] --> EM[EM / SSH]
-    BACKUP[Réseau backup] --> RMAN[Flux RMAN]
-    DB --> IB[RoCE ou InfiniBand]
-    IB --> CELL[Storage Cells]
+```text
+réseau client
+réseau administration
+réseau backup
+réseau interne RoCE / InfiniBand
+réseau Data Guard selon architecture
+réseau supervision selon design
 ```
 
-### Exemple concret réaliste
+Chaque réseau a son rôle.
 
-Pendant une fenêtre de reporting, l’équipe observe des timeouts applicatifs alors que la base et les cellules restent up. Le réflexe débutant serait de conclure à un problème général de performance. L’analyse V5 impose plutôt de vérifier si l’événement est isolé à une cellule, à un database server, à un réseau ou à une base. Si une seule cellule montre une métrique anormale alors que les autres restent stables, la piste est locale. Si toutes les cellules montrent la même hausse au même instant, il faut chercher une opération globale : chargement massif, backup, rebalance ASM, scan parallèle ou patching.
+| Réseau | Rôle |
+|---|---|
+| Client | Connexions applications vers services Oracle |
+| Administration | SSH, gestion, supervision, administration |
+| Backup | RMAN, transferts, appliance backup |
+| Interne RoCE/InfiniBand | RAC, ASM, iDB, Storage Cells |
+| Data Guard | Transport redo vers standby |
+| Supervision | EM, agents, collecte selon architecture |
 
-### Comment raisonner
+---
 
-Commence par fixer la période exacte de l’incident, puis compare trois horloges : heure applicative, heure base et heure composant Exadata. Ensuite, identifie l’objet affecté : cellule, disque, flash, port réseau, instance, service, diskgroup ou target Enterprise Manager. Enfin, vérifie si l’anomalie modifie réellement l’expérience des sessions : hausse des waits, baisse de débit, erreurs applicatives ou alertes critiques. Une métrique élevée sans impact observable peut rester un signal de capacité ; une métrique modérée mais corrélée à des erreurs peut être prioritaire.
+## 3. Pourquoi le réseau est critique
 
-### Commandes / vues utiles
+Un problème réseau peut apparaître comme :
+
+```text
+connexion application impossible
+connexion lente
+RMAN lent
+Data Guard lag
+latence cell
+instabilité RAC
+erreur listener
+métriques EM absentes
+```
+
+Erreur fréquente :
+
+```text
+Diagnostiquer une sauvegarde lente comme un problème SQL.
+```
+
+Correction :
+
+```text
+Identifier d’abord le chemin réseau réellement utilisé.
+```
+
+---
+
+## 4. Réseau client
+
+Le réseau client transporte les connexions applicatives.
+
+Composants :
+
+```text
+SCAN
+SCAN listeners
+VIP
+listeners
+services RAC
+DNS
+firewall
+load balancer éventuel
+```
+
+Commandes :
 
 ```bash
-ip -s link
-ip route
-netstat -s | head -80
-cellcli -e "list metriccurrent where name like 'N_%' attributes name,metricValue,objectName"
+srvctl status scan
+srvctl status scan_listener
+srvctl status listener
+srvctl status service -d <db_unique_name>
+lsnrctl status
 ```
 
-```sql
-select inst_id, event, total_waits, time_waited_micro
-from gv$system_event
-where event like 'cell%' or event like 'gc%' or event like 'log file%'
-order by time_waited_micro desc fetch first 20 rows only;
+SQL :
 
-select inst_id, name, value
-from gv$sysstat
-where name like 'cell%' or name like 'physical%'
+```sql
+select inst_id, name, network_name
+from gv$services
 order by inst_id, name;
 ```
 
-### Comment interpréter
+Symptômes :
 
-L’interprétation correcte cherche une corrélation, pas une coïncidence. Si la métrique change avant le symptôme applicatif, elle peut être causale. Si elle change après, elle peut être une conséquence. Si elle ne change que sur un composant, la portée est locale. Si elle change partout, la cause est probablement un workload ou une opération de plate-forme. Chaque réseau a une fonction différente ; mélanger les symptômes conduit à de mauvaises conclusions.
+```text
+ORA-12154
+ORA-12514
+ORA-12541
+connexion lente
+service introuvable
+bascule non prise en compte
+```
 
-### Exercice pratique
+---
 
-Un backup RMAN ralentit mais les scans SQL restent corrects. Explique pourquoi le réseau backup devient suspect.
+## 5. Réseau administration
 
-### Corrigé détaillé
+Le réseau administration sert à :
 
-Si les scans SQL utilisent l’interconnect interne et restent stables alors que RMAN vers cible externe ralentit, la piste réseau backup ou cible backup est plus probable que storage cell. Il faut comparer débit RMAN, erreurs interfaces, routes et charge cible.
+```text
+SSH
+monitoring
+accès EM agent/OMS selon design
+gestion OS
+transfert logs
+AHF/TFA selon scénario
+```
 
-### Limites et pièges
+Symptômes :
 
-Le principal piège est de diagnostiquer depuis une capture unique. Exadata est fortement parallèle : un instantané peut masquer un pic court, un effet de cache ou une opération transitoire. Il faut conserver l’horodatage, comparer plusieurs composants et éviter les actions correctives sans preuve. Les commandes proposées ici restent read-only et servent à documenter l’état, pas à modifier la plate-forme.
+```text
+SSH lent ou impossible
+agents EM injoignables
+collecte impossible
+administration partielle
+```
 
-### À retenir
+À surveiller :
 
-Pour les réseaux Exadata, le monitoring expert relie métriques Exadata, vues Oracle, alertes et chronologie. La valeur pédagogique vient de l’interprétation, pas de l’accumulation de sorties brutes.
+```text
+connectivité
+DNS
+latence
+routes
+firewall
+accès bastion
+```
 
-[^v5-monitoring]: Oracle, *Monitoring Oracle Exadata Database Machine*, https://docs.oracle.com/en/engineered-systems/exadata-database-machine/dbmmn/
+---
+
+## 6. Réseau backup
+
+Le réseau backup peut transporter :
+
+```text
+RMAN vers appliance
+RMAN vers ZDLRA
+backup vers stockage externe
+restore
+duplication
+transferts massifs
+```
+
+Symptômes :
+
+```text
+backup lent
+restore lent
+débit inférieur à la baseline
+fenêtre RMAN dépassée
+saturation interface
+```
+
+Commandes utiles côté base :
+
+```bash
+rman target / <<EOF
+list backup summary;
+show all;
+EOF
+```
+
+Côté OS selon droits :
+
+```bash
+ip addr
+ip route
+netstat -i
+```
+
+À retenir :
+
+```text
+Une lenteur RMAN peut venir du réseau backup, pas de la database.
+```
+
+---
+
+## 7. Réseau interne RoCE / InfiniBand
+
+Le réseau interne est critique.
+
+Il transporte :
+
+```text
+trafic RAC
+trafic ASM
+trafic iDB vers Storage Cells
+Smart Scan / retours cells
+coordination cluster
+```
+
+Symptômes possibles :
+
+```text
+latence cell
+attentes I/O
+instabilité cluster
+problèmes ASM
+messages GI
+performance SQL dégradée
+```
+
+Attention :
+
+```text
+Ce réseau doit être diagnostiqué selon les procédures Oracle et du site.
+```
+
+---
+
+## 8. Data Guard et réseau
+
+Data Guard dépend du réseau entre primaire et standby.
+
+Symptômes :
+
+```text
+transport lag
+apply lag indirect
+redo transport lent
+archive gap
+erreurs de connexion standby
+```
+
+Commandes :
+
+```sql
+select database_role, open_mode, protection_mode
+from v$database;
+
+select name, value, unit
+from v$dataguard_stats;
+```
+
+```bash
+dgmgrl / "show configuration"
+```
+
+À retenir :
+
+```text
+Un transport lag est souvent un sujet réseau, redo, charge ou standby.
+Il ne faut pas le confondre avec apply lag.
+```
+
+---
+
+## 9. DNS, SCAN et résolution
+
+DNS/SCAN sont essentiels aux connexions client.
+
+À vérifier :
+
+```text
+noms SCAN
+résolution directe
+résolution inverse si requise
+adresses attendues
+TTL
+cohérence avec srvctl
+```
+
+Commandes :
+
+```bash
+srvctl config scan
+srvctl status scan
+nslookup <scan_name>
+```
+
+Selon environnement :
+
+```bash
+dig <scan_name>
+getent hosts <scan_name>
+```
+
+Erreur fréquente :
+
+```text
+Modifier un service alors que le problème vient de DNS/SCAN.
+```
+
+---
+
+## 10. Interfaces et erreurs réseau
+
+Selon droits et OS :
+
+```bash
+ip addr
+ip route
+netstat -i
+ethtool <interface>
+```
+
+À lire :
+
+```text
+interface up/down
+erreurs RX/TX
+drops
+collisions si exposées
+MTU
+routes
+débit négocié
+```
+
+Attention :
+
+```text
+Certaines commandes réseau doivent être exécutées uniquement selon les règles du site.
+```
+
+---
+
+## 11. Corrélation réseau avec database
+
+Côté database, certains symptômes peuvent orienter.
+
+Exemples :
+
+| Symptôme DB | Hypothèse réseau possible |
+|---|---|
+| connexions lentes | client/SCAN/listener |
+| Data Guard transport lag | réseau DG |
+| RMAN lent | réseau backup |
+| cell waits élevés | réseau interne ou cells |
+| EM sans métriques | réseau supervision/admin |
+
+Mais il faut prouver.
+
+Commandes SQL utiles :
+
+```sql
+select event, total_waits, time_waited
+from v$system_event
+order by time_waited desc;
+```
+
+```sql
+select name, value, unit
+from v$dataguard_stats;
+```
+
+---
+
+## 12. Timeline réseau
+
+Une timeline réseau doit contenir :
+
+```text
+heure du symptôme
+interface concernée
+changement réseau
+début backup
+début Data Guard lag
+alerte listener
+alerte switch si disponible
+erreurs OS
+alerte cell
+collecte TFA/AHF
+```
+
+Exemple :
+
+```text
+21:55 début RMAN
+22:00 baisse débit backup
+22:05 erreurs interface backup
+22:10 fenêtre RMAN dépassée
+22:15 OLTP normal
+```
+
+Conclusion :
+
+```text
+Le réseau backup est suspect, pas le SQL OLTP.
+```
+
+---
+
+## 13. Cas concret : backup lent
+
+Situation :
+
+```text
+Une sauvegarde ralentit fortement alors que les requêtes OLTP restent correctes.
+```
+
+Hypothèses :
+
+```text
+réseau backup saturé
+appliance backup lente
+RMAN channels insuffisants
+cible backup saturée
+RECO/FRA problématique
+Storage Cells occupées
+```
+
+Vérifications :
+
+```text
+débit RMAN
+logs RMAN
+réseau backup
+cell metrics
+FRA/RECO
+baseline backup
+```
+
+Commandes :
+
+```bash
+rman target / <<EOF
+list backup summary;
+show all;
+EOF
+```
+
+```sql
+select * from v$recovery_file_dest;
+```
+
+```bash
+cellcli -e "list metriccurrent"
+```
+
+---
+
+## 14. Erreurs fréquentes
+
+| Erreur | Pourquoi c’est dangereux | Correction |
+|---|---|---|
+| Parler du réseau sans dire lequel | Diagnostic flou | Nommer client/admin/backup/RDMA |
+| Confondre backup lent et SQL lent | Mauvaise couche | Vérifier chemin RMAN |
+| Ignorer SCAN/DNS | Connexion mal diagnostiquée | srvctl/nslookup |
+| Ignorer Data Guard network | Lag mal interprété | Lire transport/apply lag |
+| Conclure sans timeline | Faux lien causal | Corréler horaires |
+| Lire une seule interface | Vue incomplète | Lire chemin complet |
+| Modifier sans preuve | Risque production | Read-only puis runbook |
+
+---
+
+## 15. Commandes read-only utiles
+
+### SCAN / listeners
+
+```bash
+srvctl config scan
+srvctl status scan
+srvctl status scan_listener
+srvctl status listener
+lsnrctl status
+```
+
+### Services
+
+```bash
+srvctl status service -d <db_unique_name>
+```
+
+```sql
+select inst_id, name, network_name
+from gv$services
+order by inst_id, name;
+```
+
+### OS réseau
+
+```bash
+ip addr
+ip route
+netstat -i
+```
+
+### DNS
+
+```bash
+nslookup <scan_name>
+getent hosts <scan_name>
+```
+
+### Data Guard
+
+```sql
+select name, value, unit
+from v$dataguard_stats;
+```
+
+```bash
+dgmgrl / "show configuration"
+```
+
+### Cell / I/O
+
+```bash
+cellcli -e "list metriccurrent"
+cellcli -e "list alert history detail"
+```
+
+---
+
+## 16. Exercice pratique
+
+Une sauvegarde RMAN dépasse sa fenêtre habituelle.
+
+Contexte :
+
+```text
+OLTP normal
+reporting normal
+RMAN très lent
+Data Guard sans lag
+pas d’alerte database majeure
+```
+
+Répondez :
+
+1. Quel réseau suspectez-vous en premier ?
+2. Quelles autres causes restent possibles ?
+3. Quelles commandes utilisez-vous ?
+4. Comment évitez-vous de conclure trop vite ?
+5. Quelle recommandation prudente formulez-vous ?
+
+---
+
+## 17. Corrigé indicatif
+
+Le réseau backup est suspect en premier, car l’OLTP et le reporting restent normaux.
+
+Causes possibles :
+
+```text
+réseau backup saturé
+cible backup lente
+RMAN mal parallélisé
+Storage Cells occupées
+FRA/RECO sous pression
+```
+
+Commandes :
+
+```bash
+rman target / <<EOF
+list backup summary;
+show all;
+EOF
+
+ip addr
+ip route
+netstat -i
+cellcli -e "list metriccurrent"
+```
+
+Conclusion :
+
+```text
+Le diagnostic doit comparer le débit RMAN à la baseline,
+vérifier le réseau backup et exclure les autres causes avant toute modification.
+```
+
+---
+
+## 18. À retenir
+
+```text
+À retenir
+- Exadata utilise plusieurs réseaux.
+- Il faut toujours nommer le réseau analysé.
+- Le réseau client concerne les connexions applicatives.
+- Le réseau backup concerne RMAN et les gros transferts.
+- Le réseau interne RoCE/InfiniBand porte RAC, ASM et iDB.
+- Data Guard dépend fortement du réseau redo.
+- SCAN/DNS/listeners sont critiques pour les connexions.
+- Une timeline évite les faux diagnostics.
+```
+
+---
+
+## 19. Références officielles
+
+| Référence | Utilisation dans le module |
+|---|---|
+| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Réseaux Exadata, administration machine. |
+| [Oracle RAC Documentation](https://docs.oracle.com/en/database/) | SCAN, listeners, VIP, interconnect. |
+| [Oracle Data Guard Documentation](https://docs.oracle.com/en/database/) | Transport redo, lag, réseau Data Guard. |
+| [Oracle RMAN Documentation](https://docs.oracle.com/en/database/) | Backup, restore, channels, performance RMAN. |
