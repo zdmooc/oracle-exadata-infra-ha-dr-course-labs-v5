@@ -1,120 +1,327 @@
-    # Module 00 — Introduction au workshop Exadata
+# Module 00 — Introduction au workshop Exadata
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Comprendre le rôle d’Exadata comme système intégré, les objectifs de formation et la progression du cours. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module introduit le parcours **Oracle Exadata Database Machine Administration Workshop**.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de comprendre ce que représente Exadata dans un contexte d’administration Oracle : une plateforme intégrée combinant serveurs de bases de données, serveurs de stockage intelligents, réseau interne rapide, Oracle Grid Infrastructure, ASM, Exadata System Software et outils de supervision/support.
 
-    Le module introductif évite de réduire Exadata à une base de données rapide. Exadata est une architecture complète où Oracle Database, Grid Infrastructure, ASM, Exadata System Software et les storage cells travaillent ensemble.
+À la fin de ce module, le lecteur doit être capable de :
 
-    Le sujet **00 Introduction Au Workshop Exadata** doit être traité comme un mécanisme Exadata précis : l’objectif est d’identifier les composants concernés, les métriques qui prouvent le comportement et les limites qui empêchent une conclusion hâtive.
+- expliquer le but du workshop ;
+- comprendre pourquoi Exadata n’est pas seulement une base Oracle plus rapide ;
+- identifier les grandes familles de composants étudiées dans le cours ;
+- comprendre la logique de progression des modules ;
+- distinguer compréhension architecture, diagnostic read-only et actions de changement ;
+- adopter une méthode prudente d’analyse avant toute intervention.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **Exadata Database Machine** | Plateforme Oracle intégrée associant serveurs de bases, cellules de stockage, réseau privé rapide et logiciels optimisés pour Oracle Database. | Une base RAC sur Exadata utilise ASM et les storage cells au lieu d’un stockage SAN classique. |
-| **Workshop d’administration** | Parcours de formation orienté installation logique, administration, monitoring, maintenance, sauvegarde, support et modèles cloud. | Le cours commence par l’architecture, puis aborde storage, performance, monitoring et patching. |
-| **Système engineered** | Système conçu, testé et supporté comme un ensemble cohérent matériel/logiciel. | Un diagnostic Exadata doit inclure DB servers, cells, réseau privé, ASM et outils support. |
+## 2. Pourquoi commencer par une introduction
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **Exadata Database Machine** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
+Un administrateur qui découvre Exadata peut être tenté de l’aborder comme une base Oracle classique hébergée sur des serveurs puissants.
 
-    ## 4. Architecture concernée
+C’est une erreur.
 
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
+Exadata est un **système intégré**. Les performances, la disponibilité et les incidents doivent être compris en reliant plusieurs couches :
 
-    Les diagrammes associés au chapitre sont :
+```text
+Applications
+→ Services Oracle / listeners
+→ Database servers
+→ Grid Infrastructure / RAC
+→ ASM
+→ Réseau interne RoCE ou InfiniBand
+→ Storage cells
+→ Flash / disques
+→ Outils de monitoring et support
+```
 
-    - [`architecture-globale-exadata.mmd`](../diagrams/architecture-globale-exadata.mmd)
+Un symptôme visible côté base peut provenir :
 
-    ## 5. Fonctionnement détaillé
+- d’un plan SQL ;
+- d’un service RAC mal placé ;
+- d’une contention ASM ;
+- d’une storage cell saturée ;
+- d’un problème réseau interne ;
+- d’un défaut de flash, disque ou firmware ;
+- d’une mauvaise fenêtre de sauvegarde ;
+- d’un workload concurrent non maîtrisé.
 
-    Le module introductif évite de réduire Exadata à une base de données rapide. Exadata est une architecture complète où Oracle Database, Grid Infrastructure, ASM, Exadata System Software et les storage cells travaillent ensemble.
+Ce module pose donc la règle de base du cours :
 
-    Le fonctionnement de **00 Introduction Au Workshop Exadata** se lit en reliant la base Oracle, Grid Infrastructure, ASM, les storage cells, le réseau privé et les outils de support uniquement lorsque ces couches interviennent réellement dans le scénario étudié.
+```text
+Sur Exadata, on ne conclut jamais à partir d’une seule couche.
+On relie toujours architecture, workload, métriques et impact métier.
+```
 
-    Pour ce module, les notions centrales sont **Exadata Database Machine, Workshop d’administration, Système engineered**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour **00 Introduction Au Workshop Exadata**, l’analyse commence par une hypothèse technique testable, puis par des preuves read-only qui confirment ou écartent cette hypothèse. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+---
 
-    ## 6. Exemple concret
+## 3. Ce qu’est Oracle Exadata Database Machine
 
-    Une équipe découvre un rack Exadata après migration et doit comprendre où chercher les informations de base avant de toucher aux bases applicatives.
+Oracle Exadata Database Machine est une plateforme Oracle intégrée pour bases de données critiques.
 
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
+Elle combine :
 
-    ## 7. Commandes, vues et métriques utiles
+| Couche | Rôle |
+|---|---|
+| Database Servers | Hébergent Oracle Database, instances RAC, services, listeners, Grid Infrastructure et processus Oracle. |
+| Storage Cells | Fournissent le stockage intelligent, les disques, la flash, CellCLI, Smart Scan, Storage Index, IORM et métriques cellule. |
+| ASM | Présente les diskgroups Oracle à partir des grid disks exposés par les storage cells. |
+| Grid Infrastructure | Gère cluster, ressources RAC, ASM, services et haute disponibilité locale. |
+| Réseau interne | Transporte le trafic RAC, ASM et iDB entre database servers et storage cells. |
+| Réseaux externes | Séparent les flux client, administration, sauvegarde et intégration datacenter. |
+| Outils Oracle | Enterprise Manager, AHF, Exachk, ORAchk, TFA, OSWatcher, ASR, RMAN, Data Guard selon les sujets. |
 
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
+La force d’Exadata vient de l’intégration de ces couches.
 
-    ```bash
-    crsctl stat res -t
+Dans une architecture classique, une baie de stockage renvoie principalement des blocs vers les serveurs de base de données.  
+Dans Exadata, les storage cells peuvent participer au traitement : filtrage, projection, offload SQL, optimisation I/O, priorisation IORM et réduction du volume retourné aux database servers.
+
+---
+
+## 4. Ce que le workshop doit couvrir
+
+Le workshop ne se limite pas à l’architecture générale.
+
+Il couvre progressivement :
+
+| Domaine | Ce que l’on doit comprendre |
+|---|---|
+| Overview | Positionnement d’Exadata, usages, composants et différences avec une architecture Oracle classique. |
+| Architecture | Rôle des database servers, storage cells, ASM, Grid Infrastructure et réseau interne. |
+| Configuration initiale | Choix de réseau, stockage, redondance, layout, diskgroups et décisions amont. |
+| Storage Server | CellCLI, physical disks, cell disks, grid disks, flash cache, flash log, alertes et sécurité. |
+| ASM | Chaîne physical disk → cell disk → grid disk → ASM disk → diskgroup → fichiers Oracle. |
+| Smart Scan | Offload SQL, predicate filtering, column projection, Direct Path Read, Storage Index, HCC. |
+| IORM | Priorisation I/O, consolidation, noisy neighbor, Database Resource Manager et workloads concurrents. |
+| Migration | Choix entre RMAN, Data Pump, transportable tablespaces, Data Guard, GoldenGate selon contraintes. |
+| Bulk Loading | Chargement massif, direct path, external tables, SQL*Loader, Data Pump, DBFS. |
+| Monitoring | Enterprise Manager, CellCLI, AWR, ASH, métriques cells, réseau, serveur, flash, disque. |
+| Backup / Recovery | RMAN, FRA, validation, restore test, recovery, RPO/RTO. |
+| HA / DR / MAA | RAC, Data Guard, Active Data Guard, Broker, FSFO, continuité de service. |
+| Maintenance / Patching | Patching database, Grid Infrastructure, OS, firmware, Exadata System Software, prechecks et rollback. |
+| Support automatisé | AHF, Exachk, ORAchk, TFA, ASR, collecte de preuves et préparation d’un dossier support. |
+| Cloud | Exadata on-premises, Exadata Database Service, Exadata Cloud@Customer et responsabilités associées. |
+
+---
+
+## 5. Méthode de travail du cours
+
+Chaque module suit une logique simple :
+
+```text
+1. Comprendre le concept.
+2. Identifier les composants concernés.
+3. Comprendre les décisions de configuration.
+4. Lire les commandes ou vues utiles.
+5. Interpréter les résultats.
+6. Identifier les erreurs fréquentes.
+7. Appliquer le raisonnement à un scénario.
+8. Produire une conclusion technique prudente.
+```
+
+Cette méthode doit être conservée dans tout le dépôt.
+
+Le but n’est pas d’accumuler des commandes.  
+Le but est de savoir expliquer **pourquoi** une commande est utilisée, **quelle couche** elle observe, **quelle preuve** elle fournit et **ce qu’elle ne permet pas de conclure**.
+
+---
+
+## 6. Lecture read-only et actions de changement
+
+Le cours privilégie les commandes de lecture et de diagnostic.
+
+Exemples de commandes de lecture :
+
+```bash
+crsctl stat res -t
 srvctl status database -d <db_unique_name> -v
-select instance_name,status,host_name from gv$instance;
-    ```
+asmcmd lsdg
+cellcli -e "list cell detail"
+cellcli -e "list griddisk detail"
+```
 
-    | Élément à lire | Interprétation |
-    |---|---|
-    | Exadata Database Machine | Cette information indique comment le mécanisme Exadata Database Machine se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Workshop d’administration | Cette information indique comment le mécanisme Workshop d’administration se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Système engineered | Cette information indique comment le mécanisme Système engineered se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
+Exemples de vues de lecture :
 
-    ## 8. Interprétation des résultats
+```sql
+select inst_id, instance_name, host_name, status
+from gv$instance
+order by inst_id;
 
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
+select name, total_mb, free_mb, type, state
+from v$asm_diskgroup
+order by name;
+```
 
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
+Ces commandes servent à comprendre l’état de la plateforme.
 
-    ## 9. Erreurs fréquentes
+Une action de changement doit être traitée autrement :
 
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
+| Type d’action | Exigence |
+|---|---|
+| Modification de configuration | Runbook, validation équipe, sauvegarde de l’état initial, fenêtre de maintenance. |
+| Patching | Prechecks, documentation version, plan de rollback, validation post-patch. |
+| Changement IORM | Justification workload, matrice de priorité, validation métier/production. |
+| Changement ASM/storage | Analyse de capacité, redondance, risque de rebalance, validation DBA/infrastructure. |
+| Incident critique | Collecte de preuves, ouverture SR si nécessaire, traçabilité des décisions. |
 
-    ## 10. Bonnes pratiques
+---
 
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
+## 7. Schéma global du parcours
 
-    ## 11. Exercice pratique
+```mermaid
+flowchart TB
+    A[00 Introduction] --> B[01 Overview]
+    B --> C[02 Architecture]
+    C --> D[05 Configuration initiale]
+    D --> E[06 Storage Cells]
+    E --> F[07 ASM]
+    F --> G[10 Smart Scan]
+    G --> H[08 IORM]
+    H --> I[11 Consolidation]
+    I --> J[12 Migration]
+    J --> K[13 Bulk Data Loading]
+    K --> L[14 à 21 Monitoring]
+    L --> M[22 Backup and Recovery]
+    M --> N[23 HA / DR / MAA]
+    N --> O[25 Patching]
+    O --> P[26 Automated Support]
+    P --> Q[27 Exadata Cloud]
+```
 
-    Vous êtes responsable du sujet **Introduction au workshop Exadata** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
+Ce schéma montre la logique pédagogique :
 
-    > Une équipe découvre un rack Exadata après migration et doit comprendre où chercher les informations de base avant de toucher aux bases applicatives.
+```text
+Comprendre l’architecture
+→ comprendre le stockage
+→ comprendre la performance
+→ comprendre l’exploitation
+→ comprendre la continuité
+→ comprendre la maintenance
+→ comprendre les variantes cloud
+```
 
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
+---
 
-    ## 12. Corrigé de l’exercice
+## 8. Exemple de situation réelle
 
-    Une bonne réponse commence par identifier les composants du chapitre : **Exadata Database Machine, Workshop d’administration, Système engineered**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
+Une équipe reprend l’exploitation d’un environnement Exadata après migration.
 
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance. La recommandation finale doit rester proportionnée : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
+Avant toute intervention, elle doit répondre à des questions simples :
 
-    ## 13. Synthèse à retenir
+```text
+Combien y a-t-il de database servers ?
+Combien y a-t-il de storage cells ?
+Quels diskgroups ASM existent ?
+Quels services RAC portent les applications ?
+Quelles bases sont critiques ?
+Où passent les flux client, admin, backup et interconnect ?
+Quels outils de supervision sont en place ?
+Quels rapports Exachk / AHF sont disponibles ?
+Quelle est la stratégie RMAN / Data Guard ?
+Quelle est la dernière version patchée ?
+```
 
-    ```text
-    À retenir
-    - Introduction au workshop Exadata fait partie d’un ensemble Exadata intégré : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : Exadata Database Machine, Workshop d’administration, Système engineered.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
+Ces questions évitent de modifier une plateforme sans compréhension.
 
+---
 
-## Références officielles
+## 9. Erreurs fréquentes au démarrage
+
+| Erreur | Pourquoi c’est dangereux | Bonne approche |
+|---|---|---|
+| Considérer Exadata comme un simple serveur Oracle | On ignore les storage cells, ASM, réseau interne et offload. | Lire la chaîne complète DB → ASM → Cell → réseau. |
+| Diagnostiquer uniquement depuis la base | Certains symptômes viennent des cells, du réseau, de la flash ou d’ASM. | Croiser vues Oracle, CellCLI, AWR/ASH et monitoring. |
+| Confondre performance et disponibilité | Une requête lente n’est pas forcément un problème HA/DR. | Séparer performance SQL, I/O, cluster, backup et DR. |
+| Changer sans preuve | Une action non maîtrisée peut aggraver la situation. | Collecter des preuves read-only avant modification. |
+| Oublier les responsabilités cloud | En cloud, certaines couches sont opérées différemment. | Identifier clairement le modèle de responsabilité. |
+
+---
+
+## 10. Bonnes pratiques de lecture du cours
+
+Pour chaque module, appliquer la même grille :
+
+| Question | Réponse attendue |
+|---|---|
+| Quel composant est étudié ? | Database server, storage cell, ASM, réseau, outil, backup, cloud, etc. |
+| Quel problème ce composant résout-il ? | Performance, stockage, disponibilité, diagnostic, support, maintenance. |
+| Quelle preuve peut-on lire ? | Vue SQL, commande CellCLI, AWR, ASH, EM, AHF, Exachk, TFA. |
+| Quelle erreur faut-il éviter ? | Conclusion trop rapide, action destructive, diagnostic mono-couche. |
+| Quel impact métier ? | Latence, disponibilité, RPO/RTO, capacité, coût, risque opérationnel. |
+
+---
+
+## 11. Exercice pratique
+
+Vous arrivez dans une équipe DBA qui exploite un rack Exadata déjà en production.
+
+Rédigez une note courte répondant aux points suivants :
+
+1. Quels composants faut-il identifier en premier ?
+2. Quelles commandes read-only peut-on lancer sans modifier la plateforme ?
+3. Quelles informations faut-il demander à l’équipe production ?
+4. Quelles erreurs faut-il éviter pendant la prise de connaissance ?
+5. Quelle méthode adopter avant de proposer un changement ?
+
+---
+
+## 12. Corrigé indicatif
+
+Une bonne réponse commence par identifier les couches principales :
+
+```text
+Database servers
+Storage cells
+ASM diskgroups
+Grid Infrastructure
+Réseaux client / admin / backup / interne
+Outils de monitoring
+Stratégie backup / HA / DR
+Version Exadata / Oracle / GI
+```
+
+Les premières commandes doivent rester read-only :
+
+```bash
+crsctl stat res -t
+srvctl status database -d <db_unique_name> -v
+asmcmd lsdg
+cellcli -e "list cell detail"
+```
+
+La note doit aussi expliquer que l’on ne change pas une configuration Exadata sans :
+
+```text
+preuve technique
+contexte de charge
+validation d’équipe
+runbook
+fenêtre de maintenance
+plan de retour arrière
+```
+
+Une bonne conclusion ne propose pas immédiatement une correction.  
+Elle propose d’abord une cartographie, une collecte de métriques, une revue de l’état de santé et une priorisation des sujets.
+
+---
+
+## 13. À retenir
+
+```text
+À retenir
+- Exadata est un système intégré, pas seulement une base Oracle rapide.
+- Le workshop doit couvrir architecture, configuration, stockage, performance, migration, monitoring, sauvegarde, HA/DR, maintenance, support et cloud.
+- Le diagnostic Exadata doit relier plusieurs couches : database, cluster, ASM, storage cells, réseau et outils Oracle.
+- Les commandes read-only servent à comprendre avant d’agir.
+- Toute action de changement doit être séparée du diagnostic et encadrée par un runbook.
+- Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
+```
+
+---
+
+## 14. Références officielles
 
 | Référence | Utilisation dans le module |
 |---|---|
@@ -123,4 +330,3 @@ select instance_name,status,host_name from gv$instance;
 | [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
 | [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
 | [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
-
