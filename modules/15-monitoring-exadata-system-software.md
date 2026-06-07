@@ -1,224 +1,601 @@
-    # Module 15 — Monitoring Exadata System Software
+# Module 15 — Monitoring Exadata System Software
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Comprendre le suivi des versions, images, alertes logiciel et cohérence Exadata System Software. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module explique comment surveiller **Exadata System Software** sur une plateforme Oracle Exadata.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de comprendre que la santé Exadata ne dépend pas uniquement d’Oracle Database. Les versions logicielles, les images installées, les alertes CellCLI, les historiques de patching, les firmwares, les composants Storage Server et la cohérence entre nœuds doivent être suivis régulièrement.
 
-    Le logiciel Exadata est aussi important que le matériel. Des versions incohérentes ou inconnues compliquent support, patching et diagnostic.
+À la fin de ce module, le lecteur doit être capable de :
 
-    Le monitoring Exadata transforme des signaux dispersés en preuve d’exploitation. Il sert à relier un symptôme applicatif aux métriques database, cluster, storage cell, réseau ou support automatisé.
+- expliquer le rôle d’Exadata System Software ;
+- vérifier les versions installées sur DB servers et Storage Cells ;
+- lire `imageinfo` et `imagehistory` ;
+- identifier les incohérences de version ;
+- lire les alertes Exadata System Software ;
+- comprendre les liens entre version, patching, support et diagnostic ;
+- utiliser CellCLI pour lire les informations système ;
+- préparer une vérification avant patching ;
+- éviter de confondre version Oracle Database et version Exadata System Software.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **Exadata System Software** | Logiciel Oracle exécuté sur les storage cells et composants Exadata pour fournir offload, flash, métriques et administration. | Une version cell détermine les fonctionnalités disponibles. |
-| **imageinfo** | Commande affichant les informations d’image logicielle installée. | Avant patching, on compare imageinfo sur plusieurs hôtes. |
-| **imagehistory** | Historique des images installées et opérations de mise à jour. | Il aide à comprendre depuis quand une version est active. |
+## 2. Pourquoi ce sujet est important
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **Exadata System Software** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
+Exadata System Software fournit une partie essentielle des capacités Exadata :
 
-    ## 4. Architecture concernée
+```text
+Smart Scan
+SQL Offload
+Storage Index
+Flash Cache
+Flash Log
+IORM
+CellCLI
+métriques cells
+alerthistory
+gestion des griddisks
+surveillance des physical disks
+intégration support Oracle
+```
 
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
+Un problème de version ou d’image peut avoir des impacts sur :
 
-    Les diagrammes associés au chapitre sont :
+```text
+support Oracle
+patching
+fonctionnalités disponibles
+diagnostic
+compatibilité
+sécurité
+performance
+stabilité
+```
 
-    - [`monitoring-stack.mmd`](../diagrams/monitoring-stack.mmd)
+À retenir :
 
-    ## 5. Fonctionnement détaillé
+```text
+Exadata System Software est aussi important que le matériel.
+Une plateforme Exadata saine doit avoir des versions connues, cohérentes et documentées.
+```
 
-    Le logiciel Exadata est aussi important que le matériel. Des versions incohérentes ou inconnues compliquent support, patching et diagnostic.
+---
 
-    Le fonctionnement se lit par corrélation temporelle : événement métier, métrique database, état cluster, alerte cell, métrique réseau et rapport d’outil. Le diagnostic valide que les horodatages, instances et composants désignent la même période.
+## 3. Exadata System Software — définition
 
-    Pour ce module, les notions centrales sont **Exadata System Software, imageinfo, imagehistory**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour le monitoring, l’analyse commence par la question opérationnelle à résoudre, puis sélectionne les métriques utiles au lieu d’empiler des graphiques sans hypothèse. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+Exadata System Software est l’ensemble logiciel Oracle utilisé sur les composants Exadata pour fournir les fonctions spécifiques à la machine.
 
-    ## 6. Exemple concret
+Il est principalement visible côté Storage Cells, mais son suivi concerne toute la plateforme.
 
-    Avant une campagne de patching, l’équipe doit inventorier les images DB nodes et cells.
+Composants concernés :
 
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
+```text
+Storage Cells
+Database Servers
+firmware
+drivers
+outils Exadata
+CellCLI
+services système
+images logicielles
+patch bundles
+```
 
-    ## 7. Commandes, vues et métriques utiles
+Différence importante :
 
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
-
-    ```bash
-    crsctl stat res -t
-cellcli -e "list alerthistory detail"
-tfactl print status
-    ```
-
-    | Élément à lire | Interprétation |
-    |---|---|
-    | Exadata System Software | Cette information indique comment le mécanisme Exadata System Software se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| imageinfo | Cette information indique comment le mécanisme imageinfo se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| imagehistory | Cette information indique comment le mécanisme imagehistory se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-
-    ## 8. Interprétation des résultats
-
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
-
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
-
-    ## 9. Erreurs fréquentes
-
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
-
-    ## 10. Bonnes pratiques
-
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
-
-    ## 11. Exercice pratique
-
-    Vous êtes responsable du sujet **Monitoring Exadata System Software** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
-
-    > Avant une campagne de patching, l’équipe doit inventorier les images DB nodes et cells.
-
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
-
-    ## 12. Corrigé de l’exercice
-
-    Une bonne réponse commence par identifier les composants du chapitre : **Exadata System Software, imageinfo, imagehistory**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
-
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance.  : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
-
-    ## 13. Synthèse à retenir
-
-    ```text
-    À retenir
-    - Monitoring Exadata System Software  : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : Exadata System Software, imageinfo, imagehistory.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
-
-
-
-
-## Rectification V5 vérifiable — contenu expert non générique
-
-Cette section rend visible la finition experte V5 pour **Monitoring du logiciel système Exadata**. Elle impose un raisonnement lié aux objets réels du thème plutôt qu’une formule répétée entre modules.
-
-| Élément expert V5 | Application concrète au module |
+| Élément | Rôle |
 |---|---|
-| Objets à contrôler | imageinfo, versions cells, alert history, services Exadata, métriques système. |
-| Méthode de diagnostic | vérifier version, état logiciel et alertes avant diagnostic applicatif. |
-| Cas d’école attendu | une divergence de version cell peut expliquer un comportement différent entre cellules. |
-| Preuve minimale | Une sortie read-only horodatée, un composant nommé, une métrique interprétée et une conséquence métier. |
-| Limite | Le diagnostic reste invalide si la preuve ne distingue pas charge normale, anomalie transitoire et cause racine. |
+| Oracle Database | Moteur SQL, transactions, instances |
+| Grid Infrastructure | Cluster, ASM, ressources RAC |
+| Exadata System Software | Fonctionnalités Exadata côté infrastructure et Storage Cells |
+| Firmware | Couche matérielle bas niveau |
+| OS Image | Image système des nœuds/cells |
 
-### Raisonnement attendu
+---
 
-Pour **Monitoring du logiciel système Exadata**, l’analyse commence par une question précise. L’administrateur ne cherche pas à appliquer une recette, mais à démontrer ou exclure une hypothèse. Les preuves doivent être collectées sans modification de configuration, puis rapprochées de la fenêtre horaire, du workload et de la version de plateforme. Une conclusion professionnelle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans augmenter le risque opérationnel.
+## 4. Ce qu’il faut surveiller
 
-### Exercice V5 complémentaire
+| Domaine | Ce qu’on vérifie |
+|---|---|
+| Version | version installée sur chaque composant |
+| Image | image courante via `imageinfo` |
+| Historique | anciennes images via `imagehistory` |
+| Cohérence | mêmes niveaux attendus selon composants |
+| Alertes | `alerthistory`, alertes hardware/software |
+| Fonctionnalités | Smart Scan, flash, IORM, metrics |
+| Support | version supportée, recommandée, compatible |
+| Patching | état avant/après patch |
+| Firmware | cohérence avec image Exadata |
+| Santé cells | statut cell, disks, grid disks, flash |
 
-Analysez le cas suivant : **une divergence de version cell peut expliquer un comportement différent entre cellules**. Produisez une note courte contenant le symptôme, les objets Exadata concernés, trois preuves read-only, les hypothèses rejetées et la recommandation.
+---
 
-### Corrigé V5 complémentaire
+## 5. imageinfo
 
-La réponse correcte nomme les objets du module, explique pourquoi les preuves choisies testent l’hypothèse et sépare diagnostic, décision et changement. Elle ne propose pas de modification immédiate si les métriques ne démontrent pas la cause. Elle prévoit également une validation après action, car une correction Exadata doit être prouvée par la disparition du symptôme ou par le retour à un niveau de service attendu.
+### 5.1 Rôle
 
-## Références officielles
+`imageinfo` affiche l’image logicielle installée sur un composant Exadata.
+
+Il permet d’identifier :
+
+```text
+version de l’image
+date d’installation
+type d’image
+build
+informations système
+niveau logiciel courant
+```
+
+Commande :
+
+```bash
+imageinfo
+```
+
+À utiliser sur :
+
+```text
+DB servers
+Storage Cells
+selon droits et procédures du site
+```
+
+### 5.2 Lecture attendue
+
+Une sortie `imageinfo` doit être conservée comme preuve dans :
+
+```text
+inventaire plateforme
+pré-check patching
+post-check patching
+dossier support
+audit de version
+```
+
+À retenir :
+
+```text
+imageinfo donne l’état courant.
+imagehistory donne l’historique.
+```
+
+---
+
+## 6. imagehistory
+
+### 6.1 Rôle
+
+`imagehistory` affiche les images précédemment installées.
+
+Il aide à comprendre :
+
+```text
+quand une image a été appliquée
+quel niveau était installé avant
+quelle opération de patching a eu lieu
+si plusieurs composants ont été patchés de manière cohérente
+```
+
+Commande :
+
+```bash
+imagehistory
+```
+
+### 6.2 Utilisation
+
+Cas d’usage :
+
+```text
+analyse post-incident
+préparation rollback
+audit patching
+comparaison avant/après
+vérification de campagne
+```
+
+Erreur fréquente :
+
+```text
+Regarder uniquement la version actuelle sans vérifier l’historique.
+```
+
+---
+
+## 7. Cohérence de version
+
+Une plateforme Exadata doit avoir une cohérence de version selon les règles Oracle et la génération concernée.
+
+À vérifier :
+
+```text
+DB servers au niveau attendu
+Storage Cells au niveau attendu
+patch GI compatible
+patch Oracle Home compatible
+firmware cohérent
+drivers réseau cohérents
+outils support à jour
+```
+
+Attention :
+
+```text
+La cohérence ne veut pas toujours dire que tous les composants ont exactement le même numéro.
+Elle signifie que les versions sont compatibles et supportées ensemble.
+```
+
+---
+
+## 8. CellCLI et Exadata System Software
+
+CellCLI permet de lire les informations des Storage Cells.
+
+Commandes utiles :
+
+```bash
+cellcli -e "list cell detail"
+cellcli -e "list cell attributes name,releaseVersion"
+cellcli -e "list alert history"
+cellcli -e "list metriccurrent"
+cellcli -e "list griddisk attributes name,status,asmmodestatus,asmdeactivationoutcome"
+cellcli -e "list physicaldisk attributes name,status,errormessage"
+```
+
+Ce qu’on cherche :
+
+```text
+version cell
+statut cell
+alertes actives ou historiques
+métriques anormales
+griddisks dégradés
+physical disks en erreur
+flash cache dégradé
+```
+
+---
+
+## 9. Alert history
+
+### 9.1 Rôle
+
+`alert history` contient les alertes connues par les Storage Cells.
+
+Commande :
+
+```bash
+cellcli -e "list alert history detail"
+```
+
+À lire :
+
+```text
+date
+sévérité
+composant
+message
+état
+répétition
+corrélation avec incident
+```
+
+### 9.2 Interprétation
+
+Une alerte peut être :
+
+```text
+critique
+warning
+informative
+transitoire
+déjà clear
+persistante
+```
+
+À retenir :
+
+```text
+Une alerte historique n’est pas forcément une alerte active.
+Mais elle peut expliquer une période d’incident.
+```
+
+---
+
+## 10. MetricCurrent et MetricHistory
+
+### 10.1 MetricCurrent
+
+`metriccurrent` donne l’état actuel.
+
+Commande :
+
+```bash
+cellcli -e "list metriccurrent"
+```
+
+Utilité :
+
+```text
+voir les métriques instantanées
+identifier une anomalie en cours
+croiser avec symptôme immédiat
+```
+
+### 10.2 MetricHistory
+
+`metrichistory` permet de regarder l’évolution.
+
+Commande indicative :
+
+```bash
+cellcli -e "list metrichistory"
+```
+
+Utilité :
+
+```text
+analyser une période passée
+comparer avec timeline
+identifier une anomalie temporaire
+```
+
+À retenir :
+
+```text
+MetricCurrent répond à “que se passe-t-il maintenant ?”
+MetricHistory répond à “que s’est-il passé pendant l’incident ?”
+```
+
+---
+
+## 11. Exadata Software et patching
+
+Avant patching, il faut connaître :
+
+```text
+image actuelle
+historique image
+versions Oracle Homes
+version GI
+état cluster
+état cells
+alertes existantes
+backup disponible
+Data Guard si présent
+fenêtre validée
+plan rollback
+```
+
+Commandes read-only utiles :
+
+```bash
+imageinfo
+imagehistory
+opatch lsinventory
+crsctl stat res -t
+cellcli -e "list cell detail"
+cellcli -e "list alert history"
+```
+
+À retenir :
+
+```text
+On ne prépare pas un patch Exadata sans inventaire logiciel fiable.
+```
+
+---
+
+## 12. Exadata Software et support Oracle
+
+Oracle Support peut demander :
+
+```text
+imageinfo
+imagehistory
+exachk
+tfactl diagcollect
+alerthistory
+metric history
+opatch lsinventory
+logs GI / DB / cell
+```
+
+Un bon dossier support contient :
+
+```text
+symptôme
+impact métier
+période
+versions
+composants concernés
+alertes
+métriques
+actions déjà tentées
+logs ciblés
+```
+
+---
+
+## 13. Diagnostic de version incohérente
+
+Méthode :
+
+```text
+1. Lister les DB servers.
+2. Lister les Storage Cells.
+3. Exécuter imageinfo selon procédure.
+4. Exécuter imagehistory selon procédure.
+5. Comparer les niveaux attendus.
+6. Vérifier alertes cells.
+7. Vérifier GI / Oracle Home.
+8. Croiser avec exachk.
+9. Documenter les écarts.
+10. Ne rien corriger sans procédure de patching.
+```
+
+---
+
+## 14. Exemple concret
+
+Situation :
+
+```text
+Avant une campagne de patching, l’équipe doit inventorier les images DB nodes et Storage Cells.
+```
+
+Démarche :
+
+```text
+collecter imageinfo
+collecter imagehistory
+collecter opatch lsinventory
+collecter état cluster
+collecter état cells
+collecter alert history
+exécuter exachk si procédure autorisée
+préparer matrice versions / composants
+```
+
+Matrice attendue :
+
+| Composant | Hôte | Image actuelle | Historique récent | Alerte | Statut |
+|---|---|---|---|---|---|
+| DB Server | dbnode01 | à relever | à relever | à relever | OK/KO |
+| DB Server | dbnode02 | à relever | à relever | à relever | OK/KO |
+| Storage Cell | cell01 | à relever | à relever | à relever | OK/KO |
+| Storage Cell | cell02 | à relever | à relever | à relever | OK/KO |
+
+---
+
+## 15. Erreurs fréquentes
+
+| Erreur | Pourquoi c’est dangereux | Correction |
+|---|---|---|
+| Confondre version DB et version Exadata Software | Diagnostic faux | Séparer Database, GI, Exadata Software |
+| Regarder une seule cell | Incohérence non détectée | Comparer toutes les cells |
+| Oublier imagehistory | Perte contexte patch | Lire historique |
+| Ignorer alert history | Incident passé invisible | Lire alertes |
+| Patcher sans état initial | Pas de preuve avant/après | Capturer pré-check |
+| Croire EM suffisant | Agent/target peut masquer | Vérifier localement |
+| Corriger sans procédure | Risque production | CAB/runbook Oracle |
+
+---
+
+## 16. Commandes read-only utiles
+
+### Image
+
+```bash
+imageinfo
+imagehistory
+```
+
+### Oracle Home
+
+```bash
+opatch lsinventory
+```
+
+### Cluster
+
+```bash
+crsctl stat res -t
+```
+
+### Storage Cells
+
+```bash
+cellcli -e "list cell detail"
+cellcli -e "list cell attributes name,releaseVersion"
+cellcli -e "list alert history detail"
+cellcli -e "list metriccurrent"
+cellcli -e "list griddisk attributes name,status,asmmodestatus,asmdeactivationoutcome"
+cellcli -e "list physicaldisk attributes name,status,errormessage"
+```
+
+### AHF / Exachk
+
+```bash
+ahfctl status
+exachk -v
+```
+
+---
+
+## 17. Exercice pratique
+
+Avant une campagne de patching, vous devez vérifier la cohérence logicielle d’une plateforme Exadata.
+
+Répondez :
+
+1. Quelles informations collectez-vous ?
+2. Pourquoi `imageinfo` ne suffit pas ?
+3. Pourquoi `imagehistory` est utile ?
+4. Quelles commandes CellCLI utilisez-vous ?
+5. Quelles erreurs faut-il éviter ?
+6. Quelle recommandation formulez-vous avant le Go patching ?
+
+---
+
+## 18. Corrigé indicatif
+
+Informations à collecter :
+
+```text
+imageinfo sur DB servers et Storage Cells
+imagehistory
+opatch lsinventory
+état CRS
+état cells
+alert history
+métriques cells si incident récent
+exachk si autorisé
+```
+
+`imageinfo` ne suffit pas parce qu’il donne surtout l’état courant. L’historique permet de comprendre les patchs précédents et les éventuelles incohérences.
+
+CellCLI :
+
+```bash
+cellcli -e "list cell detail"
+cellcli -e "list cell attributes name,releaseVersion"
+cellcli -e "list alert history detail"
+cellcli -e "list metriccurrent"
+```
+
+Recommandation :
+
+```text
+Le Go patching ne doit être donné qu’après inventaire complet,
+absence d’alerte bloquante, cohérence de versions, backup validé,
+état cluster sain, rapport de pré-check acceptable et rollback documenté.
+```
+
+---
+
+## 19. À retenir
+
+```text
+À retenir
+- Exadata System Software fournit les fonctions spécifiques Exadata.
+- imageinfo donne l’image courante.
+- imagehistory donne l’historique des images.
+- Les versions doivent être cohérentes et supportées ensemble.
+- CellCLI permet de lire les informations des Storage Cells.
+- Alert history et metrics doivent être reliés à une timeline.
+- Un patching fiable commence par un inventaire logiciel fiable.
+- EM aide, mais ne remplace pas les vérifications locales.
+```
+
+---
+
+## 20. Références officielles
 
 | Référence | Utilisation dans le module |
 |---|---|
-| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
-| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Administration Exadata, Storage Server, CellCLI, maintenance et monitoring. |
-| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
-| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
-| [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
-## Complément expert V5 — Exadata System Software et services cellule
-
-### Explication technique spécifique
-
-Le monitoring Exadata ne consiste pas à regarder une seule alerte ou un seul graphe. Pour **Exadata System Software**, l’objectif est de rapprocher l’état matériel, l’état logiciel, les métriques courantes et la perception côté base. Une alerte cellule peut être bénigne si elle correspond à une transition attendue, mais elle peut aussi expliquer une hausse de latence observée par les sessions Oracle. La démarche experte consiste à identifier la mesure native, son objet, son horodatage, puis à la comparer avec les waits, les statistiques SQL et l’état ASM. Enterprise Manager apporte une vision centralisée, tandis que `cellcli`, les vues dynamiques et les journaux de diagnostic donnent une preuve locale.[^v5-monitoring]
-
-Pour ce thème, un DBA confirmé doit distinguer **symptôme**, **cause probable** et **preuve observable**. Le symptôme typique est : des alertes répétées sur une cellule et une baisse d’efficacité Smart Scan. La cause peut être locale au composant, liée à une saturation, à une opération planifiée ou à une panne partielle. La preuve doit venir d’au moins deux sources indépendantes : métrique cellule et vue base, alerte système et historique Enterprise Manager, ou état ASM et journal Exadata.
-
-| Indicateur | Ce qu’il mesure | Interprétation experte |
-|---|---|---|
-| `CL_CPUT` | CPU consommé sur la cellule | Peut indiquer offload, compression ou tâches internes |
-| `CL_MEMUT` | Utilisation mémoire cellule | À corréler avec services cellule et alertes |
-| `IORM_MODE` | Mode ou état lié à IORM selon version | Confirme la présence de gouvernance I/O |
-
-```mermaid
-flowchart LR
-    CELL[Storage Cell] --> CELLSRV[cellsrv]
-    CELL --> MS[management server]
-    CELL --> RS[restart server]
-    CELLSRV --> OFF[Offload et I/O]
-    MS --> ALERT[Alertes et métriques]
-    ALERT --> EM[Enterprise Manager]
-```
-
-### Exemple concret réaliste
-
-Pendant une fenêtre de reporting, l’équipe observe des alertes répétées sur une cellule et une baisse d’efficacité Smart Scan. Le réflexe débutant serait de conclure à un problème général de performance. L’analyse V5 impose plutôt de vérifier si l’événement est isolé à une cellule, à un database server, à un réseau ou à une base. Si une seule cellule montre une métrique anormale alors que les autres restent stables, la piste est locale. Si toutes les cellules montrent la même hausse au même instant, il faut chercher une opération globale : chargement massif, backup, rebalance ASM, scan parallèle ou patching.
-
-### Comment raisonner
-
-Commence par fixer la période exacte de l’incident, puis compare trois horloges : heure applicative, heure base et heure composant Exadata. Ensuite, identifie l’objet affecté : cellule, disque, flash, port réseau, instance, service, diskgroup ou target Enterprise Manager. Enfin, vérifie si l’anomalie modifie réellement l’expérience des sessions : hausse des waits, baisse de débit, erreurs applicatives ou alertes critiques. Une métrique élevée sans impact observable peut rester un signal de capacité ; une métrique modérée mais corrélée à des erreurs peut être prioritaire.
-
-### Commandes / vues utiles
-
-```bash
-cellcli -e "list cell attributes name,releaseVersion,kernelVersion,makeModel,status"
-cellcli -e "list metriccurrent where objectType = 'CELL' attributes name,metricValue"
-cellcli -e "list alerthistory attributes severity,alertMessage,beginTime"
-```
-
-```sql
-select inst_id, event, total_waits, time_waited_micro
-from gv$system_event
-where event like 'cell%' or event like 'gc%' or event like 'log file%'
-order by time_waited_micro desc fetch first 20 rows only;
-
-select inst_id, name, value
-from gv$sysstat
-where name like 'cell%' or name like 'physical%'
-order by inst_id, name;
-```
-
-### Comment interpréter
-
-L’interprétation correcte cherche une corrélation, pas une coïncidence. Si la métrique change avant le symptôme applicatif, elle peut être causale. Si elle change après, elle peut être une conséquence. Si elle ne change que sur un composant, la portée est locale. Si elle change partout, la cause est probablement un workload ou une opération de plate-forme. Une cellule peut répondre au ping tout en ayant un service Exadata dégradé ; l’état réseau seul n’est pas suffisant.
-
-### Exercice pratique
-
-Une cellule affiche une version logicielle différente des autres après maintenance. Explique le risque pédagogique et les preuves à collecter.
-
-### Corrigé détaillé
-
-Il faut vérifier la version avec `list cell attributes releaseVersion`, comparer toutes les cellules, lire les alertes et vérifier les symptômes côté base. Une différence de version après maintenance peut être temporaire ou révéler un patch incomplet. La réponse correcte ne demande pas de corriger directement ; elle documente l’écart et prépare l’escalade.
-
-### Limites et pièges
-
-Le principal piège est de diagnostiquer depuis une capture unique. Exadata est fortement parallèle : un instantané peut masquer un pic court, un effet de cache ou une opération transitoire. Il faut conserver l’horodatage, comparer plusieurs composants et éviter les actions correctives sans preuve. Les commandes proposées ici restent read-only et servent à documenter l’état, pas à modifier la plate-forme.
-
-### À retenir
-
-Pour Exadata System Software, le monitoring expert relie métriques Exadata, vues Oracle, alertes et chronologie. La valeur pédagogique vient de l’interprétation, pas de l’accumulation de sorties brutes.
-
-[^v5-monitoring]: Oracle, *Monitoring Oracle Exadata Database Machine*, https://docs.oracle.com/en/engineered-systems/exadata-database-machine/dbmmn/
+| [Oracle Exadata System Software Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/sagug/) | Exadata System Software, CellCLI, metrics, alerts. |
+| [Oracle Exadata Database Machine Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Architecture, patching, administration Exadata. |
+| [Oracle OPatch Documentation](https://docs.oracle.com/en/enterprise-manager/) | Inventaire Oracle Home et patching. |
+| [Oracle Autonomous Health Framework Documentation](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, TFA. |

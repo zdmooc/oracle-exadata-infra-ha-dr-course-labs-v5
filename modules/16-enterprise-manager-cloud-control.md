@@ -1,224 +1,655 @@
-    # Module 16 — Enterprise Manager Cloud Control
+# Module 16 — Enterprise Manager Cloud Control
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Utiliser Enterprise Manager pour surveiller Exadata : targets, agents, incidents, blackouts et tableaux de bord. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module explique comment utiliser **Oracle Enterprise Manager Cloud Control** pour surveiller une plateforme Oracle Exadata.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de comprendre qu’Enterprise Manager centralise la supervision, mais ne remplace pas les vérifications locales. Une absence d’alerte dans EM ne prouve pas qu’il n’y a aucun problème : les agents, targets, blackouts, seuils, collectes et droits doivent eux-mêmes être contrôlés.
 
-    Enterprise Manager apporte une vue centralisée, mais il doit lui-même être surveillé. Une absence d’alerte dans EM n’équivaut pas toujours à une absence de problème.
+À la fin de ce module, le lecteur doit être capable de :
 
-    Exadata Cloud Service et Cloud@Customer ajoutent une séparation de responsabilités entre client et Oracle. L’enjeu technique est de savoir quelle couche peut être observée, administrée ou escaladée par chaque acteur.
+- expliquer le rôle d’Enterprise Manager dans le monitoring Exadata ;
+- comprendre les notions d’agent, target, incident, metric et blackout ;
+- vérifier qu’un target est découvert et surveillé ;
+- comprendre les risques d’un agent arrêté ou mal configuré ;
+- distinguer alerte EM, incident EM et problème réel ;
+- utiliser EM pour corréler database, ASM, host, cell et rack ;
+- savoir quand compléter EM avec CellCLI, SQL, crsctl, AHF ou TFA ;
+- préparer une vérification post-maintenance.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **Agent EM** | Composant installé sur hôte pour envoyer métriques et inventaire vers Enterprise Manager. | Si l’agent est arrêté, EM peut ne plus afficher les incidents récents. |
-| **Target** | Entité surveillée par EM : host, database, ASM, listener, Exadata rack ou cell. | Un target cell en erreur peut masquer une alerte storage. |
-| **Blackout** | Période où les alertes EM sont suspendues pour maintenance. | Un blackout oublié peut cacher une panne réelle. |
+## 2. Pourquoi Enterprise Manager est important
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **Agent EM** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
+Enterprise Manager donne une vue centralisée sur :
 
-    ## 4. Architecture concernée
-
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
-
-    Les diagrammes associés au chapitre sont :
-
-    - [`monitoring-stack.mmd`](../diagrams/monitoring-stack.mmd)
-
-    ## 5. Fonctionnement détaillé
-
-    Enterprise Manager apporte une vue centralisée, mais il doit lui-même être surveillé. Une absence d’alerte dans EM n’équivaut pas toujours à une absence de problème.
-
-    Le fonctionnement se lit par responsabilité : base et schémas, VM cluster, Grid Infrastructure, storage cells, infrastructure cloud, réseau et support. Le diagnostic doit respecter ces frontières.
-
-    Pour ce module, les notions centrales sont **Agent EM, Target, Blackout**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour Exadata Cloud, l’analyse commence par identifier si le problème relève du tenant, de la VM cluster, du service managé ou de l’infrastructure sous-jacente. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
-
-    ## 6. Exemple concret
-
-    Après maintenance, les alertes Exadata ne remontent plus ; le chapitre vérifie agents, targets et blackouts.
-
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
-
-    ## 7. Commandes, vues et métriques utiles
-
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
-
-    ```bash
-    crsctl stat res -t
-srvctl status database -d <db_unique_name> -v
-select instance_name,status,host_name from gv$instance;
-    ```
-
-    | Élément à lire | Interprétation |
-    |---|---|
-    | Agent EM | Cette information indique comment le mécanisme Agent EM se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Target | Cette information indique comment le mécanisme Target se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Blackout | Cette information indique comment le mécanisme Blackout se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-
-    ## 8. Interprétation des résultats
-
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
-
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
-
-    ## 9. Erreurs fréquentes
-
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
-
-    ## 10. Bonnes pratiques
-
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
-
-    ## 11. Exercice pratique
-
-    Vous êtes responsable du sujet **Enterprise Manager Cloud Control** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
-
-    > Après maintenance, les alertes Exadata ne remontent plus ; le chapitre vérifie agents, targets et blackouts.
-
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
-
-    ## 12. Corrigé de l’exercice
-
-    Une bonne réponse commence par identifier les composants du chapitre : **Agent EM, Target, Blackout**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
-
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance.  : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
-
-    ## 13. Synthèse à retenir
-
-    ```text
-    À retenir
-    - Enterprise Manager Cloud Control  : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : Agent EM, Target, Blackout.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
-
-
-
-
-## Rectification V5 vérifiable — contenu expert non générique
-
-Cette section rend visible la finition experte V5 pour **Enterprise Manager Cloud Control**. Elle impose un raisonnement lié aux objets réels du thème plutôt qu’une formule répétée entre modules.
-
-| Élément expert V5 | Application concrète au module |
-|---|---|
-| Objets à contrôler | targets Exadata, incidents, métriques, seuils, jobs, rapports. |
-| Méthode de diagnostic | utiliser EM comme console de corrélation et non comme unique source de vérité. |
-| Cas d’école attendu | un incident EM doit être confirmé par métriques cellule ou vues database avant action. |
-| Preuve minimale | Une sortie read-only horodatée, un composant nommé, une métrique interprétée et une conséquence métier. |
-| Limite | Le diagnostic reste invalide si la preuve ne distingue pas charge normale, anomalie transitoire et cause racine. |
-
-### Raisonnement attendu
-
-Pour **Enterprise Manager Cloud Control**, l’analyse commence par une question précise. L’administrateur ne cherche pas à appliquer une recette, mais à démontrer ou exclure une hypothèse. Les preuves doivent être collectées sans modification de configuration, puis rapprochées de la fenêtre horaire, du workload et de la version de plateforme. Une conclusion professionnelle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans augmenter le risque opérationnel.
-
-### Exercice V5 complémentaire
-
-Analysez le cas suivant : **un incident EM doit être confirmé par métriques cellule ou vues database avant action**. Produisez une note courte contenant le symptôme, les objets Exadata concernés, trois preuves read-only, les hypothèses rejetées et la recommandation.
-
-### Corrigé V5 complémentaire
-
-La réponse correcte nomme les objets du module, explique pourquoi les preuves choisies testent l’hypothèse et sépare diagnostic, décision et changement. Elle ne propose pas de modification immédiate si les métriques ne démontrent pas la cause. Elle prévoit également une validation après action, car une correction Exadata doit être prouvée par la disparition du symptôme ou par le retour à un niveau de service attendu.
-
-## Références officielles
-
-| Référence | Utilisation dans le module |
-|---|---|
-| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
-| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Administration Exadata, Storage Server, CellCLI, maintenance et monitoring. |
-| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
-| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
-| [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
-## Complément expert V5 — Enterprise Manager Cloud Control pour Exadata
-
-### Explication technique spécifique
-
-Le monitoring Exadata ne consiste pas à regarder une seule alerte ou un seul graphe. Pour **Enterprise Manager Cloud Control**, l’objectif est de rapprocher l’état matériel, l’état logiciel, les métriques courantes et la perception côté base. Une alerte cellule peut être bénigne si elle correspond à une transition attendue, mais elle peut aussi expliquer une hausse de latence observée par les sessions Oracle. La démarche experte consiste à identifier la mesure native, son objet, son horodatage, puis à la comparer avec les waits, les statistiques SQL et l’état ASM. Enterprise Manager apporte une vision centralisée, tandis que `cellcli`, les vues dynamiques et les journaux de diagnostic donnent une preuve locale.[^v5-monitoring]
-
-Pour ce thème, un DBA confirmé doit distinguer **symptôme**, **cause probable** et **preuve observable**. Le symptôme typique est : un incident visible dans EM mais difficile à reproduire en ligne de commande. La cause peut être locale au composant, liée à une saturation, à une opération planifiée ou à une panne partielle. La preuve doit venir d’au moins deux sources indépendantes : métrique cellule et vue base, alerte système et historique Enterprise Manager, ou état ASM et journal Exadata.
-
-| Indicateur | Ce qu’il mesure | Interprétation experte |
-|---|---|---|
-| `Target Status` | État agrégé d’une cible EM | Donne la portée mais peut masquer le composant racine |
-| `Incident count` | Nombre d’incidents ouverts | À qualifier par sévérité et répétition |
-| `Metric collection error` | Erreur de collecte | Peut indiquer un problème agent plutôt qu’un problème Exadata |
-
-```mermaid
-flowchart LR
-    TARGET[Cible Exadata EM] --> AGENT[Agent EM]
-    AGENT --> CELL[Cellules]
-    AGENT --> DB[Database Targets]
-    AGENT --> HOST[Hosts]
-    TARGET --> INCIDENT[Incidents]
-    TARGET --> METRIC[Métriques historiques]
+```text
+bases Oracle
+instances RAC
+listeners
+ASM
+hosts
+Exadata rack
+Storage Cells
+services
+jobs
+incidents
+métriques
+alertes
+blackouts
 ```
 
-### Exemple concret réaliste
+Il aide à :
 
-Pendant une fenêtre de reporting, l’équipe observe un incident visible dans EM mais difficile à reproduire en ligne de commande. Le réflexe débutant serait de conclure à un problème général de performance. L’analyse V5 impose plutôt de vérifier si l’événement est isolé à une cellule, à un database server, à un réseau ou à une base. Si une seule cellule montre une métrique anormale alors que les autres restent stables, la piste est locale. Si toutes les cellules montrent la même hausse au même instant, il faut chercher une opération globale : chargement massif, backup, rebalance ASM, scan parallèle ou patching.
+```text
+suivre la santé globale
+visualiser les alertes
+centraliser les incidents
+surveiller les performances
+piloter des jobs
+conserver un historique
+préparer un dossier support
+```
 
-### Comment raisonner
+Mais il dépend de :
 
-Commence par fixer la période exacte de l’incident, puis compare trois horloges : heure applicative, heure base et heure composant Exadata. Ensuite, identifie l’objet affecté : cellule, disque, flash, port réseau, instance, service, diskgroup ou target Enterprise Manager. Enfin, vérifie si l’anomalie modifie réellement l’expérience des sessions : hausse des waits, baisse de débit, erreurs applicatives ou alertes critiques. Une métrique élevée sans impact observable peut rester un signal de capacité ; une métrique modérée mais corrélée à des erreurs peut être prioritaire.
+```text
+agents actifs
+targets découverts
+permissions
+réseau de supervision
+seuils adaptés
+collectes récentes
+blackouts correctement terminés
+```
 
-### Commandes / vues utiles
+À retenir :
+
+```text
+Enterprise Manager est un point de supervision central.
+Mais il n’est pas une preuve unique.
+```
+
+---
+
+## 3. Concepts clés
+
+| Concept | Définition | Exemple |
+|---|---|---|
+| Agent EM | Processus installé sur un hôte pour collecter et envoyer des données | Agent arrêté = métriques absentes |
+| Target | Objet surveillé par EM | database, host, ASM, listener, cell |
+| Metric | Mesure collectée | CPU, sessions, latence, espace |
+| Incident | Regroupement d’alertes ou problèmes | Incident storage cell |
+| Alert | Signal déclenché par seuil ou règle | tablespace presque plein |
+| Blackout | Suspension programmée des alertes | maintenance planifiée |
+| Repository EM | Base stockant les données EM | Historique de monitoring |
+| OMS | Oracle Management Service | Serveur central EM |
+
+---
+
+## 4. Architecture Enterprise Manager
+
+Schéma logique :
+
+```mermaid
+flowchart TB
+    A[Targets Exadata] --> B[EM Agent]
+    B --> C[Oracle Management Service]
+    C --> D[Repository EM]
+    C --> E[Console Enterprise Manager]
+
+    A1[Database] --> B
+    A2[ASM] --> B
+    A3[Listener] --> B
+    A4[Host] --> B
+    A5[Storage Cell / Rack Target] --> B
+
+    F[DBA / Exploitation] --> E
+```
+
+À surveiller dans cette architecture :
+
+```text
+agent
+communication agent → OMS
+repository EM
+targets découverts
+statut des collections
+blackouts
+incidents
+seuils
+```
+
+---
+
+## 5. Targets Exadata
+
+Enterprise Manager peut surveiller plusieurs types de targets.
+
+| Target | Exemple de surveillance |
+|---|---|
+| Host | CPU, mémoire, filesystem, agent |
+| Oracle Database | sessions, wait events, tablespaces |
+| RAC Database | instances, services, disponibilité |
+| ASM | diskgroups, rebalance, capacité |
+| Listener | disponibilité, connexions |
+| Exadata Rack | vue globale machine |
+| Storage Cell | alertes, métriques, disques |
+| Cluster | ressources CRS, disponibilité |
+
+Erreur fréquente :
+
+```text
+Surveiller uniquement la database et oublier les Storage Cells.
+```
+
+---
+
+## 6. Agent EM
+
+### 6.1 Rôle
+
+L’agent collecte les informations locales et les remonte vers Enterprise Manager.
+
+Il peut collecter :
+
+```text
+métriques OS
+métriques database
+statut targets
+configuration
+alertes
+jobs
+disponibilité
+```
+
+### 6.2 Risques
+
+Si l’agent est arrêté ou en erreur :
+
+```text
+les métriques ne remontent plus
+les alertes peuvent être absentes
+les targets peuvent apparaître indisponibles
+les incidents peuvent être incomplets
+```
+
+Commandes utiles selon environnement :
 
 ```bash
 emctl status agent
-emctl status agent scheduler
-cellcli -e "list alerthistory attributes severity,alertMessage,beginTime"
+emctl upload agent
+emctl pingOMS
+```
+
+À retenir :
+
+```text
+Avant de conclure qu’il n’y a pas d’alerte, il faut vérifier que l’agent collecte bien.
+```
+
+---
+
+## 7. Blackout
+
+### 7.1 Définition
+
+Un blackout suspend les alertes EM pendant une maintenance.
+
+Cas d’usage :
+
+```text
+patching
+redémarrage programmé
+maintenance réseau
+intervention storage
+test contrôlé
+```
+
+### 7.2 Risque
+
+Un blackout oublié peut masquer un vrai incident.
+
+Questions à poser :
+
+```text
+Un blackout est-il actif ?
+Le blackout couvre-t-il le bon target ?
+Le blackout est-il terminé ?
+Les alertes sont-elles réactivées ?
+```
+
+Erreur fréquente :
+
+```text
+Après maintenance, les alertes ne remontent plus parce qu’un blackout est resté actif.
+```
+
+---
+
+## 8. Incidents et alertes
+
+Enterprise Manager regroupe les signaux sous forme d’alertes et d’incidents.
+
+À lire :
+
+```text
+target concerné
+sévérité
+heure de début
+heure de fin
+message
+métrique source
+répétition
+statut ouvert/fermé
+actions associées
+```
+
+Attention :
+
+```text
+Une alerte EM peut être une conséquence et non la cause.
+```
+
+Exemple :
+
+```text
+Alerte tablespace plein
+Cause réelle : batch massif + archivelogs + purge non exécutée
+```
+
+---
+
+## 9. Monitoring performance dans EM
+
+EM peut aider à lire :
+
+```text
+AWR
+ASH
+top activity
+SQL monitoring
+sessions
+wait events
+services
+CPU
+I/O
+tablespaces
+incidents
+```
+
+Mais il faut compléter avec :
+
+```text
+DBMS_XPLAN
+requêtes SQL directes
+crsctl / srvctl
+asmcmd
+CellCLI
+AHF/TFA
+```
+
+À retenir :
+
+```text
+EM aide à naviguer.
+Les preuves techniques doivent parfois être confirmées localement.
+```
+
+---
+
+## 10. EM et Exadata Storage Cells
+
+Pour Exadata, EM doit permettre de voir les Storage Cells ou targets associés.
+
+À vérifier :
+
+```text
+targets cells découverts
+alertes cells visibles
+métriques cells collectées
+état des physical disks
+état des grid disks
+flash cache
+metric history
+incidents hardware
+```
+
+Vérification locale complémentaire :
+
+```bash
+cellcli -e "list cell detail"
+cellcli -e "list alert history detail"
+cellcli -e "list metriccurrent"
+cellcli -e "list physicaldisk attributes name,status,errormessage"
+```
+
+---
+
+## 11. EM, RAC et services
+
+EM doit aider à suivre :
+
+```text
+bases RAC
+instances
+services
+listeners
+SCAN
+ressources CRS
+placement des services
+```
+
+Vérification locale :
+
+```bash
+crsctl stat res -t
+srvctl status database -d <db_unique_name> -v
+srvctl status service -d <db_unique_name>
+srvctl config service -d <db_unique_name>
+```
+
+Point clé :
+
+```text
+Une base visible dans EM ne garantit pas que le service applicatif attendu est actif.
+```
+
+---
+
+## 12. EM et ASM
+
+EM peut surveiller :
+
+```text
+diskgroups
+DATA
+RECO
+free space
+usable space
+rebalance
+alertes ASM
+```
+
+Vérification locale :
+
+```bash
+asmcmd lsdg
 ```
 
 ```sql
-select inst_id, event, total_waits, time_waited_micro
-from gv$system_event
-where event like 'cell%' or event like 'gc%' or event like 'log file%'
-order by time_waited_micro desc fetch first 20 rows only;
-
-select inst_id, name, value
-from gv$sysstat
-where name like 'cell%' or name like 'physical%'
-order by inst_id, name;
+select name, total_mb, free_mb, usable_file_mb, type, state
+from v$asm_diskgroup
+order by name;
 ```
 
-### Comment interpréter
+---
 
-L’interprétation correcte cherche une corrélation, pas une coïncidence. Si la métrique change avant le symptôme applicatif, elle peut être causale. Si elle change après, elle peut être une conséquence. Si elle ne change que sur un composant, la portée est locale. Si elle change partout, la cause est probablement un workload ou une opération de plate-forme. EM est excellent pour la tendance et l’agrégation ; CellCLI et les vues dynamiques restent nécessaires pour la preuve locale.
+## 13. Post-maintenance : méthode de vérification
 
-### Exercice pratique
+Après maintenance, vérifier :
 
-EM signale une target Exadata down mais les bases répondent. Explique comment éviter une fausse conclusion.
+```text
+agents actifs
+targets visibles
+blackouts terminés
+incidents nouveaux
+métriques récentes
+bases ouvertes
+services actifs
+ASM OK
+cells sans alerte bloquante
+jobs EM éventuels OK
+```
 
-### Corrigé détaillé
+Méthode :
 
-La target EM down peut venir d’un agent, d’un credential, d’une collecte ou d’un réseau d’administration. Il faut vérifier l’agent, l’état réel des cellules, les instances et les alertes. Si la base répond et que CellCLI ne montre pas d’erreur, l’incident porte peut-être sur la supervision, pas sur le service de données.
+```text
+1. Vérifier statut agent.
+2. Vérifier upload agent.
+3. Vérifier blackouts.
+4. Vérifier disponibilité des targets.
+5. Vérifier incidents ouverts.
+6. Vérifier métriques récentes.
+7. Vérifier localement si EM est silencieux.
+```
 
-### Limites et pièges
+---
 
-Le principal piège est de diagnostiquer depuis une capture unique. Exadata est fortement parallèle : un instantané peut masquer un pic court, un effet de cache ou une opération transitoire. Il faut conserver l’horodatage, comparer plusieurs composants et éviter les actions correctives sans preuve. Les commandes proposées ici restent read-only et servent à documenter l’état, pas à modifier la plate-forme.
+## 14. Exemple concret
 
-### À retenir
+Situation :
 
-Pour Enterprise Manager Cloud Control, le monitoring expert relie métriques Exadata, vues Oracle, alertes et chronologie. La valeur pédagogique vient de l’interprétation, pas de l’accumulation de sorties brutes.
+```text
+Après maintenance, les alertes Exadata ne remontent plus.
+```
 
-[^v5-monitoring]: Oracle, *Monitoring Oracle Exadata Database Machine*, https://docs.oracle.com/en/engineered-systems/exadata-database-machine/dbmmn/
+Hypothèses :
+
+```text
+agent arrêté
+agent ne communique plus avec OMS
+blackout encore actif
+targets non disponibles
+seuils modifiés
+problème repository/OMS
+incident réel non collecté
+```
+
+Vérifications :
+
+```bash
+emctl status agent
+emctl upload agent
+emctl pingOMS
+```
+
+Puis côté Exadata :
+
+```bash
+cellcli -e "list alert history detail"
+crsctl stat res -t
+asmcmd lsdg
+```
+
+Conclusion prudente :
+
+```text
+L’absence d’alerte dans EM n’est fiable que si les agents,
+targets, blackouts et collectes sont eux-mêmes validés.
+```
+
+---
+
+## 15. EM Cloud Control et responsabilité
+
+Dans un contexte Exadata Cloud Service ou Cloud@Customer, la supervision dépend aussi du modèle de responsabilité.
+
+À distinguer :
+
+```text
+ce que le client voit
+ce qu’Oracle opère
+ce qui est visible dans OCI
+ce qui est visible dans EM
+ce qui demande un SR Oracle
+ce qui reste administré par le DBA
+```
+
+À retenir :
+
+```text
+La frontière de responsabilité change selon on-prem, Exadata Cloud Service et Cloud@Customer.
+```
+
+---
+
+## 16. Erreurs fréquentes
+
+| Erreur | Pourquoi c’est dangereux | Correction |
+|---|---|---|
+| Croire qu’EM suffit | Agent ou target peut être KO | Vérifier localement |
+| Oublier les blackouts | Alertes masquées | Contrôler blackouts |
+| Surveiller seulement database | Storage/cell invisible | Ajouter targets Exadata |
+| Ignorer la fraîcheur des métriques | Données anciennes | Vérifier dernière collecte |
+| Confondre incident EM et cause racine | Diagnostic faux | Corréler avec timeline |
+| Ne pas vérifier agents après maintenance | Supervision aveugle | Post-check EM |
+| Oublier droits/permissions | Targets invisibles | Vérifier accès |
+
+---
+
+## 17. Commandes read-only utiles
+
+### Agent EM
+
+```bash
+emctl status agent
+emctl upload agent
+emctl pingOMS
+```
+
+### RAC / GI
+
+```bash
+crsctl stat res -t
+srvctl status database -d <db_unique_name> -v
+srvctl status service -d <db_unique_name>
+```
+
+### ASM
+
+```bash
+asmcmd lsdg
+```
+
+```sql
+select name, total_mb, free_mb, usable_file_mb, type, state
+from v$asm_diskgroup
+order by name;
+```
+
+### Storage Cells
+
+```bash
+cellcli -e "list cell detail"
+cellcli -e "list alert history detail"
+cellcli -e "list metriccurrent"
+cellcli -e "list physicaldisk attributes name,status,errormessage"
+```
+
+### Database
+
+```sql
+select inst_id, instance_name, host_name, status
+from gv$instance
+order by inst_id;
+```
+
+```sql
+select inst_id, service_name, count(*) as sessions
+from gv$session
+where type = 'USER'
+group by inst_id, service_name
+order by sessions desc;
+```
+
+---
+
+## 18. Exercice pratique
+
+Après une maintenance, l’équipe constate que les alertes Exadata ne remontent plus dans Enterprise Manager.
+
+Contexte :
+
+```text
+la base est ouverte
+les applications fonctionnent
+aucune alerte EM visible
+une alerte CellCLI existe pourtant sur une Storage Cell
+un blackout avait été créé pour la maintenance
+```
+
+Répondez :
+
+1. Quelles hypothèses formulez-vous ?
+2. Que vérifiez-vous dans EM ?
+3. Que vérifiez-vous localement ?
+4. Pourquoi l’absence d’alerte EM ne suffit pas ?
+5. Quelle recommandation finale donnez-vous ?
+
+---
+
+## 19. Corrigé indicatif
+
+Hypothèses :
+
+```text
+blackout encore actif
+agent EM arrêté
+agent ne communique plus avec OMS
+target cell non découvert ou indisponible
+collecte métrique en retard
+droits/permissions insuffisants
+```
+
+Vérifications EM :
+
+```text
+blackouts
+targets
+incidents
+dernière collecte
+statut agent
+statut target cell
+```
+
+Vérifications locales :
+
+```bash
+emctl status agent
+emctl pingOMS
+cellcli -e "list alert history detail"
+crsctl stat res -t
+asmcmd lsdg
+```
+
+Conclusion :
+
+```text
+L’absence d’alerte EM ne prouve rien tant que l’agent, le target,
+les blackouts et la fraîcheur des métriques ne sont pas validés.
+```
+
+Recommandation :
+
+```text
+Clôturer ou corriger le blackout, vérifier les agents, forcer une collecte
+selon procédure, confirmer les alertes localement puis documenter le post-check.
+```
+
+---
+
+## 20. À retenir
+
+```text
+À retenir
+- Enterprise Manager centralise le monitoring Exadata.
+- EM dépend des agents, targets, seuils, blackouts et collectes.
+- Un target manquant rend une couche invisible.
+- Un blackout oublié peut masquer un incident.
+- Une absence d’alerte EM ne prouve pas une absence de problème.
+- EM doit être complété par SQL, crsctl, asmcmd, CellCLI, AHF/TFA.
+- Après maintenance, le post-check EM est obligatoire.
+```
+
+---
+
+## 21. Références officielles
+
+| Référence | Utilisation dans le module |
+|---|---|
+| [Oracle Enterprise Manager Cloud Control Documentation](https://docs.oracle.com/en/enterprise-manager/) | Agents, targets, incidents, blackouts, monitoring. |
+| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Targets Exadata, Storage Cells, monitoring machine. |
+| [Oracle Database Performance Tuning Guide](https://docs.oracle.com/en/database/) | AWR, ASH, SQL monitoring, wait events. |
+| [Oracle RAC Documentation](https://docs.oracle.com/en/database/) | Services RAC, CRS, listeners, availability. |
+| [Oracle Autonomous Health Framework Documentation](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, TFA, diagnostic complémentaire. |
