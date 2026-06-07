@@ -1,152 +1,742 @@
-    # Module 09 — Performance Recommendations
+# Module 09 — Performance Recommendations Exadata
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Étudier la performance Exadata avec SQL, AWR, ASH, wait events et métriques cells. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module explique comment analyser la performance Oracle sur Exadata.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de comprendre qu’une performance Exadata ne se lit pas uniquement côté base de données, ni uniquement côté Storage Cells. Il faut relier le SQL, le plan d’exécution, les statistiques AWR/ASH, les wait events, ASM, les métriques cells, le réseau interne, la flash et les workloads concurrents.
 
-    La performance Exadata se comprend en partant du SQL et en descendant vers les I/O. Les métriques database, ASM, cells et OS racontent des parties complémentaires de la même histoire.
+À la fin de ce module, le lecteur doit être capable de :
 
-    Le sujet **09 Performance Recommendations** doit être traité comme un mécanisme Exadata précis : l’objectif est d’identifier les composants concernés, les métriques qui prouvent le comportement et les limites qui empêchent une conclusion hâtive.
+- partir d’un symptôme applicatif ;
+- identifier les SQL_ID consommateurs ;
+- lire AWR et ASH avec prudence ;
+- comprendre les principaux wait events `cell%` ;
+- distinguer problème SQL, problème I/O, problème ASM, problème cell ou problème réseau ;
+- vérifier l’usage de Smart Scan et de l’offload ;
+- interpréter Flash Cache, IORM et métriques CellCLI ;
+- formuler une recommandation prudente et argumentée ;
+- éviter de conclure uniquement parce que le matériel Exadata est puissant.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **AWR** | Automatic Workload Repository historise des statistiques de performance Oracle pour comparer périodes et charges. | Un rapport AWR montre une hausse de DB time liée à cell single block physical read. |
-| **ASH** | Active Session History échantillonne les sessions actives pour identifier SQL, attente et objet. | ASH révèle qu’un SQL_ID concentre les attentes I/O. |
-| **Wait event cell** | Événement Oracle indiquant une attente liée aux I/O Exadata. | cell smart table scan apparaît lors de scans pouvant utiliser les cells. |
+## 2. Pourquoi la performance Exadata doit être raisonnée
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **AWR** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
+Exadata est une plateforme puissante, mais elle ne corrige pas automatiquement :
 
-    ## 4. Architecture concernée
+```text
+un mauvais SQL
+un mauvais plan d’exécution
+des statistiques obsolètes
+un modèle de données inefficace
+des index inadaptés
+une concurrence I/O mal contrôlée
+une sauvegarde intrusive
+une saturation réseau
+une configuration ASM mal comprise
+```
 
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
+La performance Exadata se raisonne en partant du SQL, puis en descendant vers les couches techniques :
 
-    Les diagrammes associés au chapitre sont :
+```text
+Application
+→ SQL_ID
+→ plan d’exécution
+→ AWR / ASH
+→ wait events
+→ ASM
+→ Storage Cells
+→ Flash / disques
+→ réseau interne
+→ workloads concurrents
+```
 
-    - [`monitoring-stack.mmd`](../diagrams/monitoring-stack.mmd)
+À retenir :
 
-    ## 5. Fonctionnement détaillé
+```text
+Exadata donne des capacités supplémentaires.
+Mais le diagnostic reste une démarche structurée.
+```
 
-    La performance Exadata se comprend en partant du SQL et en descendant vers les I/O. Les métriques database, ASM, cells et OS racontent des parties complémentaires de la même histoire.
+---
 
-    Le fonctionnement de **09 Performance Recommendations** se lit en reliant la base Oracle, Grid Infrastructure, ASM, les storage cells, le réseau privé et les outils de support uniquement lorsque ces couches interviennent réellement dans le scénario étudié.
+## 3. Vue d’ensemble du diagnostic performance
 
-    Pour ce module, les notions centrales sont **AWR, ASH, Wait event cell**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour **09 Performance Recommendations**, l’analyse commence par une hypothèse technique testable, puis par des preuves read-only qui confirment ou écartent cette hypothèse. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+Schéma logique :
 
-    ## 6. Exemple concret
+```mermaid
+flowchart LR
+    A[Symptôme applicatif] --> B[SQL_ID / Service]
+    B --> C[Plan SQL]
+    C --> D[AWR / ASH]
+    D --> E[Wait Events]
+    E --> F{Type dominant}
+    F --> G[CPU / SQL]
+    F --> H[I/O Database]
+    F --> I[Cell Events]
+    F --> J[ASM / Rebalance]
+    F --> K[Flash / Disques]
+    F --> L[IORM / Concurrence]
+    G --> M[Recommandation]
+    H --> M
+    I --> M
+    J --> M
+    K --> M
+    L --> M
+```
 
-    Après migration, une requête critique est plus lente alors que le matériel est plus puissant ; l’analyse doit vérifier plan, statistiques et offload.
+Méthode :
 
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
+```text
+1. Décrire le symptôme.
+2. Identifier la période.
+3. Identifier SQL_ID, service, module, base ou PDB.
+4. Lire le plan SQL.
+5. Lire AWR/ASH.
+6. Identifier les wait events dominants.
+7. Croiser avec ASM et CellCLI.
+8. Vérifier offload, flash, IORM et réseau.
+9. Formuler une recommandation limitée aux faits prouvés.
+```
 
-    ## 7. Commandes, vues et métriques utiles
+---
 
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
+## 4. AWR — Automatic Workload Repository
 
-    ```bash
-    crsctl stat res -t
-srvctl status database -d <db_unique_name> -v
-select instance_name,status,host_name from gv$instance;
-    ```
+### 4.1 Définition
 
-    | Élément à lire | Interprétation |
-    |---|---|
-    | AWR | Cette information indique comment le mécanisme AWR se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| ASH | Cette information indique comment le mécanisme ASH se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Wait event cell | Cette information indique comment le mécanisme Wait event cell se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
+AWR historise des statistiques de performance Oracle.
 
-    ## 8. Interprétation des résultats
+Il permet de comparer :
 
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
+```text
+période lente
+période normale
+top SQL
+top wait events
+DB time
+I/O
+CPU
+activité instance
+activité RAC
+```
 
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
+### 4.2 Ce qu’AWR permet de voir
 
-    ## 9. Erreurs fréquentes
-
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
-
-    ## 10. Bonnes pratiques
-
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
-
-    ## 11. Exercice pratique
-
-    Vous êtes responsable du sujet **Performance Recommendations** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
-
-    > Après migration, une requête critique est plus lente alors que le matériel est plus puissant ; l’analyse doit vérifier plan, statistiques et offload.
-
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
-
-    ## 12. Corrigé de l’exercice
-
-    Une bonne réponse commence par identifier les composants du chapitre : **AWR, ASH, Wait event cell**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
-
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance. La recommandation finale doit rester proportionnée : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
-
-    ## 13. Synthèse à retenir
-
-    ```text
-    À retenir
-    - Performance Recommendations fait partie d’un ensemble Exadata intégré : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : AWR, ASH, Wait event cell.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
-
-
-
-
-## Rectification V5 vérifiable — contenu expert non générique
-
-Cette section rend visible la finition experte V5 pour **Recommandations de performance**. Elle impose un raisonnement lié aux objets réels du thème plutôt qu’une formule répétée entre modules.
-
-| Élément expert V5 | Application concrète au module |
+| Élément | Utilité |
 |---|---|
-| Objets à contrôler | AWR, ASH, SQL Monitor, offload, flash, IORM, statistiques, parallélisme. |
-| Méthode de diagnostic | relier chaque recommandation à une preuve mesurable. |
-| Cas d’école attendu | augmenter le parallélisme sans lire les waits et le débit cell peut dégrader toute la plateforme. |
-| Preuve minimale | Une sortie read-only horodatée, un composant nommé, une métrique interprétée et une conséquence métier. |
-| Limite | Le diagnostic reste invalide si la preuve ne distingue pas charge normale, anomalie transitoire et cause racine. |
+| DB Time | Charge globale database |
+| Top SQL | SQL les plus consommateurs |
+| Top Events | Attentes principales |
+| Instance Activity | Statistiques globales |
+| IO Stats | Lecture/écriture, débit, latence |
+| RAC Statistics | Activité inter-instance |
+| Exadata Statistics | Événements et bytes `cell` selon rapport |
 
-### Raisonnement attendu
+### 4.3 Limite
 
-Pour **Recommandations de performance**, l’analyse commence par une question précise. L’administrateur ne cherche pas à appliquer une recette, mais à démontrer ou exclure une hypothèse. Les preuves doivent être collectées sans modification de configuration, puis rapprochées de la fenêtre horaire, du workload et de la version de plateforme. Une conclusion professionnelle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans augmenter le risque opérationnel.
+AWR donne une vue agrégée.
 
-### Exercice V5 complémentaire
+Il ne suffit pas toujours à comprendre une session précise.
 
-Analysez le cas suivant : **augmenter le parallélisme sans lire les waits et le débit cell peut dégrader toute la plateforme**. Produisez une note courte contenant le symptôme, les objets Exadata concernés, trois preuves read-only, les hypothèses rejetées et la recommandation.
+À retenir :
 
-### Corrigé V5 complémentaire
+```text
+AWR explique une période.
+ASH explique mieux qui attendait, quand et sur quoi.
+```
 
-La réponse correcte nomme les objets du module, explique pourquoi les preuves choisies testent l’hypothèse et sépare diagnostic, décision et changement. Elle ne propose pas de modification immédiate si les métriques ne démontrent pas la cause. Elle prévoit également une validation après action, car une correction Exadata doit être prouvée par la disparition du symptôme ou par le retour à un niveau de service attendu.
+---
 
-## Références officielles
+## 5. ASH — Active Session History
+
+### 5.1 Définition
+
+ASH échantillonne les sessions actives.
+
+Il permet de relier :
+
+```text
+session
+SQL_ID
+event
+wait class
+service
+module
+objet
+instance
+temps
+```
+
+### 5.2 Exemple de lecture ASH
+
+```sql
+select inst_id, sql_id, event, count(*) as samples
+from gv$active_session_history
+where sample_time between timestamp '2026-01-01 09:00:00'
+                      and timestamp '2026-01-01 10:00:00'
+group by inst_id, sql_id, event
+order by samples desc;
+```
+
+### 5.3 Ce qu’ASH aide à comprendre
+
+```text
+quel SQL attend
+sur quel événement
+sur quelle instance
+à quelle période
+avec quel service
+avec quel module applicatif
+```
+
+---
+
+## 6. Wait events Exadata
+
+Les wait events `cell%` indiquent des attentes liées aux I/O Exadata.
+
+Exemples :
+
+| Wait event | Lecture simplifiée |
+|---|---|
+| `cell smart table scan` | Scan pouvant impliquer Smart Scan |
+| `cell smart index scan` | Scan index pouvant impliquer offload |
+| `cell single block physical read` | Lecture bloc unique via Exadata |
+| `cell multiblock physical read` | Lecture multibloc via Exadata |
+| `cell list of blocks physical read` | Lecture d’une liste de blocs |
+| `cell smart file creation` | Création fichier via mécanismes Exadata |
+| `log file sync` | Attente commit côté base, à corréler avec redo |
+| `log file parallel write` | Écriture redo, potentiellement liée au stockage/flash |
+
+Important :
+
+```text
+Voir un événement cell ne veut pas dire automatiquement qu’il y a un problème.
+Il faut comparer la durée, le volume, le SQL, la période et le comportement attendu.
+```
+
+---
+
+## 7. Plan SQL et accès Exadata
+
+Le plan SQL est central.
+
+Commande utile :
+
+```sql
+select *
+from table(dbms_xplan.display_cursor(null, null, 'ALLSTATS LAST +PREDICATE'));
+```
+
+À chercher :
+
+```text
+TABLE ACCESS STORAGE FULL
+INDEX STORAGE FAST FULL SCAN
+storage predicates
+filter predicates
+predicate information
+actual rows
+bytes
+parallel execution
+```
+
+### 7.1 TABLE ACCESS STORAGE FULL
+
+`TABLE ACCESS STORAGE FULL` indique un accès compatible avec les mécanismes Exadata.
+
+Mais il ne suffit pas à prouver un gain.
+
+Il faut croiser avec :
+
+```text
+cell offload eligible bytes
+cell physical IO interconnect bytes
+cell smart table scan
+SQL Monitor
+AWR / ASH
+```
+
+### 7.2 Mauvaise conclusion
+
+```text
+Le plan contient STORAGE, donc Smart Scan marche parfaitement.
+```
+
+### 7.3 Bonne conclusion
+
+```text
+Le plan indique un accès compatible.
+Les métriques doivent confirmer que l’offload réduit réellement le volume retourné.
+```
+
+---
+
+## 8. Smart Scan et offload dans l’analyse performance
+
+### 8.1 Question à poser
+
+```text
+La requête lit-elle beaucoup de données ?
+Le plan est-il compatible Smart Scan ?
+Les prédicats sont-ils offloadables ?
+Les colonnes retournées sont-elles limitées ?
+Le volume retourné est-il inférieur au volume lu ?
+```
+
+### 8.2 Métriques utiles
+
+```sql
+select name, value
+from v$sysstat
+where name like 'cell%';
+```
+
+Métriques à lire :
+
+```text
+cell physical IO bytes eligible for predicate offload
+cell physical IO interconnect bytes
+cell physical IO interconnect bytes returned by smart scan
+cell scans
+```
+
+### 8.3 Interprétation
+
+Si le volume éligible est élevé et le volume retourné sur l’interconnect est beaucoup plus faible, l’offload apporte probablement un gain.
+
+Si le volume retourné reste proche du volume lu, le gain d’offload est limité.
+
+---
+
+## 9. Flash Cache dans l’analyse performance
+
+Flash Cache peut accélérer certaines lectures.
+
+Il faut distinguer :
+
+```text
+gain par réduction de volume : Smart Scan / Offload
+gain par lecture plus rapide : Flash Cache
+```
+
+Métriques / indices possibles :
+
+```text
+latence de lecture
+type de wait events
+métriques CellCLI
+répétition des lectures
+profil OLTP
+blocs chauds
+```
+
+À retenir :
+
+```text
+Une requête rapide n’est pas forcément rapide grâce à Smart Scan.
+Elle peut être rapide grâce au cache, au plan SQL, à la partition pruning ou à la flash.
+```
+
+---
+
+## 10. ASM et rebalance dans la performance
+
+ASM peut influencer temporairement la performance.
+
+Cas possibles :
+
+```text
+rebalance en cours
+diskgroup proche saturation
+disk offline
+grid disk dégradé
+failure group impacté
+alerte cell
+capacité RECO insuffisante
+```
+
+Commande utile :
+
+```sql
+select group_number, operation, state, power, actual, sofar, est_work, est_rate, est_minutes
+from v$asm_operation;
+```
+
+Autres lectures :
+
+```bash
+asmcmd lsdg
+asmcmd lsdsk -p
+cellcli -e "list griddisk attributes name,status,asmmodestatus,asmdeactivationoutcome,size"
+```
+
+---
+
+## 11. IORM et concurrence I/O
+
+IORM doit être vérifié lorsque plusieurs workloads partagent les mêmes Storage Cells.
+
+Questions :
+
+```text
+Un batch tourne-t-il en même temps que l’OLTP ?
+Une sauvegarde RMAN chevauche-t-elle une période métier ?
+Un reporting consomme-t-il trop d’I/O ?
+Une PDB non critique perturbe-t-elle une PDB critique ?
+Un plan IORM est-il actif ?
+```
+
+Commandes / vues possibles :
+
+```bash
+cellcli -e "list iormplan"
+cellcli -e "list iormplan detail"
+cellcli -e "list metriccurrent"
+```
+
+À retenir :
+
+```text
+IORM est utile pour une concurrence prouvée.
+Il ne remplace pas l’optimisation SQL.
+```
+
+---
+
+## 12. Réseau interne RoCE / InfiniBand
+
+Le réseau interne transporte :
+
+```text
+RAC
+ASM
+iDB
+demandes vers Storage Cells
+retour des blocs ou résultats filtrés
+```
+
+Un problème de réseau interne peut apparaître comme :
+
+```text
+latence I/O
+attentes cell élevées
+symptômes RAC
+ralentissement SQL
+problèmes ASM
+```
+
+À vérifier selon droits et procédures :
+
+```text
+état interfaces
+erreurs réseau
+alertes cells
+métriques Exadata
+logs système
+outils support Oracle
+```
+
+---
+
+## 13. Méthode de diagnostic SQL lent après migration
+
+### Situation
+
+Une requête est plus lente après migration vers Exadata, alors que le matériel est plus puissant.
+
+### Mauvaise conclusion
+
+```text
+Exadata ne marche pas.
+```
+
+### Bonne démarche
+
+```text
+1. Comparer le plan SQL avant/après.
+2. Vérifier statistiques objets.
+3. Identifier les wait events.
+4. Vérifier Smart Scan / offload.
+5. Vérifier index et partition pruning.
+6. Vérifier parallélisme.
+7. Vérifier Flash Cache ou lectures physiques.
+8. Vérifier concurrence IORM.
+9. Vérifier ASM / cells / alertes.
+10. Formuler une conclusion prouvée.
+```
+
+### Causes possibles
+
+```text
+plan SQL changé
+statistiques différentes
+index non utilisé
+partition pruning absent
+offload absent
+fonction non offloadable
+parallélisme inadapté
+concurrence I/O
+rebalance ASM
+backup en cours
+```
+
+---
+
+## 14. Recommandations de performance
+
+### 14.1 Recommandations SQL
+
+```text
+identifier les SQL_ID dominants
+comparer les plans
+vérifier statistiques
+vérifier cardinalités
+vérifier prédicats
+vérifier partition pruning
+vérifier accès STORAGE
+éviter les fonctions empêchant l’offload si possible
+```
+
+### 14.2 Recommandations Exadata
+
+```text
+vérifier offload réel
+vérifier bytes éligibles vs bytes retournés
+vérifier CellCLI
+vérifier Flash Cache si lecture répétée
+vérifier IORM si consolidation
+vérifier ASM rebalance
+vérifier alertes cells
+```
+
+### 14.3 Recommandations exploitation
+
+```text
+ne pas changer sans preuve
+comparer à une période saine
+documenter la période
+lier chaque recommandation à une métrique
+séparer observation et action
+passer par runbook / CAB si changement
+```
+
+---
+
+## 15. Commandes read-only utiles
+
+### 15.1 AWR / ASH
+
+```sql
+select inst_id, sql_id, event, count(*) as samples
+from gv$active_session_history
+where sample_time > systimestamp - interval '1' hour
+group by inst_id, sql_id, event
+order by samples desc;
+```
+
+### 15.2 Wait events cell
+
+```sql
+select event, total_waits, time_waited
+from v$system_event
+where event like 'cell%'
+order by time_waited desc;
+```
+
+### 15.3 Statistiques cell côté base
+
+```sql
+select name, value
+from v$sysstat
+where name like 'cell%'
+order by name;
+```
+
+### 15.4 Plan SQL
+
+```sql
+select *
+from table(dbms_xplan.display_cursor('<sql_id>', null, 'ALLSTATS LAST +PREDICATE'));
+```
+
+### 15.5 ASM
+
+```bash
+asmcmd lsdg
+asmcmd lsdsk -p
+```
+
+```sql
+select group_number, operation, state, power, est_minutes
+from v$asm_operation;
+```
+
+### 15.6 CellCLI
+
+```bash
+cellcli -e "list cell detail"
+cellcli -e "list alert history"
+cellcli -e "list metriccurrent"
+cellcli -e "list griddisk attributes name,status,asmmodestatus,asmdeactivationoutcome,size"
+```
+
+### 15.7 IORM
+
+```bash
+cellcli -e "list iormplan"
+cellcli -e "list iormplan detail"
+```
+
+---
+
+## 16. Tableau de diagnostic rapide
+
+| Symptôme | Hypothèse | Preuve à chercher |
+|---|---|---|
+| SQL lent | Mauvais plan | DBMS_XPLAN, AWR, ASH |
+| Attentes `cell smart table scan` élevées | Grand scan / Smart Scan | Plan, offload bytes, SQL Monitor |
+| Peu de gain Exadata | Offload absent ou faible | eligible bytes vs interconnect bytes |
+| OLTP ralenti pendant reporting | Noisy neighbor | ASH par service, CellCLI, IORM |
+| Latence redo | Écriture redo / Flash Log | `log file sync`, `log file parallel write` |
+| Dégradation temporaire | Rebalance ASM | `v$asm_operation` |
+| Sauvegarde trop lente | Réseau backup / RMAN / cible | RMAN logs, débit réseau, cible ZDLRA |
+| Problème global I/O | Cell / flash / disque | CellCLI metrics, alerts |
+
+---
+
+## 17. Erreurs fréquentes
+
+| Erreur | Pourquoi c’est dangereux | Correction |
+|---|---|---|
+| Dire “Exadata est puissant donc SQL doit être rapide” | Mauvais SQL reste mauvais | Analyser plan et statistiques |
+| Conclure avec une seule métrique | Risque de faux diagnostic | Croiser AWR, ASH, plan, CellCLI |
+| Confondre Smart Scan et Flash Cache | Gains différents | Séparer réduction de volume et accélération lecture |
+| Ignorer IORM | Noisy neighbor non traité | Vérifier workloads concurrents |
+| Ignorer ASM | Rebalance ou diskgroup peut impacter | Lire ASM et CellCLI |
+| Modifier sans preuve | Risque de régression | Preuve, test, runbook, CAB |
+| Oublier période saine | Pas de comparaison | Comparer avant/après ou normal/lent |
+
+---
+
+## 18. Exercice pratique
+
+Après migration vers Exadata, une requête critique est plus lente qu’avant.
+
+Le métier dit :
+
+```text
+Le matériel est plus puissant, donc ce n’est pas normal.
+```
+
+Répondez :
+
+1. Pourquoi cette affirmation est incomplète ?
+2. Quelles informations collecter en premier ?
+3. Quelles vues ou commandes lire ?
+4. Comment vérifier Smart Scan / offload ?
+5. Comment vérifier une concurrence I/O ?
+6. Comment formuler une recommandation prudente ?
+
+---
+
+## 19. Corrigé indicatif
+
+L’affirmation est incomplète parce qu’Exadata apporte des capacités supplémentaires, mais ne corrige pas automatiquement un mauvais plan SQL, des statistiques obsolètes ou une mauvaise écriture de requête.
+
+Informations à collecter :
+
+```text
+période lente
+SQL_ID
+plan actuel
+plan avant migration si disponible
+AWR
+ASH
+wait events
+statistiques objets
+métriques cell
+activité concurrente
+état ASM
+alertes cells
+```
+
+Vues et commandes :
+
+```sql
+select *
+from table(dbms_xplan.display_cursor('<sql_id>', null, 'ALLSTATS LAST +PREDICATE'));
+
+select event, total_waits, time_waited
+from v$system_event
+where event like 'cell%'
+order by time_waited desc;
+
+select name, value
+from v$sysstat
+where name like 'cell%';
+```
+
+```bash
+asmcmd lsdg
+cellcli -e "list cell detail"
+cellcli -e "list alert history"
+cellcli -e "list metriccurrent"
+```
+
+Pour Smart Scan / offload, vérifier :
+
+```text
+TABLE ACCESS STORAGE FULL
+storage predicates
+cell physical IO bytes eligible for predicate offload
+cell physical IO interconnect bytes
+cell smart table scan
+```
+
+Pour concurrence I/O :
+
+```text
+ASH par service ou SQL_ID
+workloads simultanés
+IORM plan actif ou absent
+métriques CellCLI
+RMAN ou batch en cours
+```
+
+Conclusion prudente :
+
+```text
+À ce stade, on ne conclut pas que le problème vient d’Exadata.
+On identifie d’abord si le temps est consommé par le SQL, l’I/O, l’absence d’offload,
+la concurrence I/O, ASM ou les Storage Cells. La recommandation dépendra des preuves.
+```
+
+---
+
+## 20. À retenir
+
+```text
+À retenir
+- La performance Exadata commence par le SQL.
+- AWR explique une période.
+- ASH aide à identifier qui attendait, quand et sur quoi.
+- Les wait events cell doivent être interprétés avec contexte.
+- Smart Scan doit être prouvé par le plan et les métriques.
+- Flash Cache et Smart Scan ne sont pas la même chose.
+- IORM est utile si une concurrence I/O est prouvée.
+- ASM et Storage Cells doivent être vérifiés.
+- Toute recommandation doit être liée à une preuve.
+```
+
+---
+
+## 21. Références officielles
 
 | Référence | Utilisation dans le module |
 |---|---|
-| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
-| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Administration Exadata, Storage Server, CellCLI, maintenance et monitoring. |
-| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
-| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
-| [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
-
+| [Oracle Database Performance Tuning Guide](https://docs.oracle.com/en/database/) | AWR, ASH, wait events, SQL tuning, DBMS_XPLAN. |
+| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Smart Scan, Storage Cells, monitoring Exadata. |
+| [Oracle Exadata System Software Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/sagug/) | CellCLI, métriques cells, IORM, Storage Server. |
+| [Oracle ASM Documentation](https://docs.oracle.com/en/database/) | Diskgroups, rebalance, vues ASM. |
