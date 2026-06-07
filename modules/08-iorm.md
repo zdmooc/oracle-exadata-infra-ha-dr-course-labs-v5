@@ -1,278 +1,728 @@
 # Module 08 — IORM
 
-## 1. Objectif pédagogique
+## 1. Objectif du module
 
-À la fin de ce module, le lecteur doit être capable d’expliquer précisément le rôle d’**I/O Resource Management**, appelé **IORM**, dans une plateforme Oracle Exadata consolidée. Il doit comprendre pourquoi IORM existe, où il agit, comment il se distingue de **Database Resource Manager** et comment les deux mécanismes peuvent être combinés pour protéger les applications critiques sans interdire l’exécution des traitements secondaires.
+Ce module explique **IORM**, c’est-à-dire **I/O Resource Management**, dans Oracle Exadata.
 
-Le lecteur doit également savoir concevoir une politique de priorisation I/O adaptée à une plateforme partagée. Cette compétence ne consiste pas à choisir arbitrairement une application prioritaire, mais à relier chaque workload à une criticité métier, à une fenêtre d’exécution, à une consommation I/O observable et à un risque opérationnel. Un bon plan IORM n’est donc pas seulement une configuration technique ; c’est une traduction contrôlée d’une politique de service.
+L’objectif est de comprendre comment Exadata peut prioriser les ressources d’entrée/sortie entre plusieurs bases, PDB, services ou workloads qui partagent les mêmes Storage Cells.
 
-Enfin, le lecteur doit savoir diagnostiquer un cas de **noisy neighbor** sur Exadata. Il doit pouvoir distinguer une saturation globale des storage cells, une mauvaise classification Resource Manager, un plan IORM absent, un SQL non sélectif, une sauvegarde trop intrusive ou une charge batch exécutée au mauvais moment. Le livrable attendu à la fin du module est une **matrice workload / priorité / justification**, accompagnée de preuves de lecture, de métriques et d’une recommandation argumentée.
+À la fin de ce module, le lecteur doit être capable de :
 
-| Compétence attendue | Résultat observable |
-|---|---|
-| Comprendre IORM | Le lecteur sait expliquer que l’arbitrage I/O est appliqué par les storage cells lorsqu’elles servent des requêtes concurrentes. |
-| Expliquer pourquoi IORM existe | Le lecteur sait relier IORM à la consolidation, aux workloads concurrents et à la protection des services critiques. |
-| Distinguer IORM et Database Resource Manager | Le lecteur sait séparer classification côté base et arbitrage côté stockage. |
-| Concevoir une politique I/O | Le lecteur sait produire une matrice de priorité justifiée par criticité, fenêtre et profil d’accès. |
-| Diagnostiquer un noisy neighbor | Le lecteur sait collecter des preuves read-only avant de proposer un changement. |
-| Produire une matrice workload / priorité / justification | Le lecteur sait formaliser une décision exploitable par une équipe DBA, infrastructure et métier. |
+- expliquer le rôle d’IORM ;
+- comprendre pourquoi IORM est important dans une plateforme consolidée ;
+- distinguer IORM et Database Resource Manager ;
+- comprendre où IORM agit dans l’architecture Exadata ;
+- identifier les workloads critiques et secondaires ;
+- concevoir une matrice workload / priorité / justification ;
+- diagnostiquer un cas de noisy neighbor ;
+- lire les métriques utiles avant toute modification ;
+- éviter de configurer une priorité sans preuve métier et technique.
 
-## 2. Pourquoi IORM est important dans Exadata
+---
 
-Exadata est très souvent utilisée comme plateforme consolidée. Une même infrastructure peut héberger plusieurs bases de données, plusieurs PDB, plusieurs services applicatifs ou plusieurs environnements de criticité différente. Cette consolidation est recherchée parce qu’Exadata fournit une puissance de traitement, de stockage et d’interconnexion élevée, mais elle introduit un risque classique des plateformes partagées : un workload très consommateur peut dégrader la latence ou le débit observé par les autres workloads.
+## 2. Pourquoi IORM est important
 
-Sans mécanisme d’arbitrage, une opération de reporting, un batch de chargement, une sauvegarde RMAN ou un traitement analytique volumineux peut monopoliser une part importante des ressources I/O. Le problème n’est pas seulement le volume lu ou écrit ; il est aussi lié au moment où la charge apparaît. Un reporting acceptable la nuit peut devenir problématique à 10 h si une application OLTP critique doit conserver une latence stable pour traiter des transactions utilisateur.
+Exadata est souvent utilisée comme plateforme consolidée.
 
-IORM répond à ce problème en permettant aux **storage cells** d’appliquer une politique de gouvernance sur les requêtes I/O concurrentes. Les cells ne se contentent pas de recevoir passivement des demandes ; elles peuvent arbitrer l’accès aux ressources disque et flash selon un plan défini. L’objectif n’est pas d’arrêter les workloads secondaires, mais de leur donner une place contrôlée lorsque les workloads prioritaires ont besoin de ressources.
+Une même infrastructure peut héberger :
 
-Cette nuance est essentielle. Une plateforme de production ne peut pas simplement suspendre toutes les sauvegardes, tous les batchs ou tous les reportings dès qu’une application critique travaille. Elle doit au contraire maintenir plusieurs activités en parallèle tout en respectant une hiérarchie de service. IORM permet cette hiérarchie : l’OLTP critique peut conserver une priorité de latence, le reporting peut être ralenti mais non bloqué, le batch peut utiliser la capacité disponible hors pics, et la sauvegarde peut être encadrée afin de ne pas provoquer une contention incontrôlée.
+```text
+plusieurs bases de données
+plusieurs PDB
+plusieurs applications
+plusieurs environnements
+plusieurs workloads
+plusieurs niveaux de criticité
+```
 
-| Situation de consolidation | Risque sans IORM | Apport d’IORM |
-|---|---|---|
-| Base OLTP et entrepôt décisionnel sur les mêmes cells | Les scans analytiques consomment les ressources I/O pendant les heures ouvrées. | Les I/O OLTP peuvent être prioritaires lorsque les deux charges sont concurrentes. |
-| Plusieurs PDB de criticité différente | Une PDB de test ou de reporting perturbe une PDB de production. | Une politique peut refléter la criticité réelle des services. |
-| Sauvegarde RMAN pendant activité métier | La sauvegarde augmente la latence perçue par les applications. | La sauvegarde peut être contrôlée pour préserver la charge critique. |
-| Batch massif débordant de sa fenêtre | La charge batch continue à consommer après le début de la journée. | Le batch peut être limité lorsque l’OLTP redevient prioritaire. |
+Cette consolidation est utile, mais elle crée un risque :
 
-## 3. Concepts clés
+```text
+un workload très consommateur peut dégrader les autres workloads.
+```
 
-| Concept | Définition | Exemple concret | À ne pas confondre avec |
-|---|---|---|---|
-| **IORM** | Mécanisme Exadata de gestion des ressources I/O appliqué par les storage cells pour arbitrer des demandes concurrentes selon une politique. | Une base OLTP reçoit un traitement prioritaire lorsque des scans reporting sollicitent les mêmes cells. | Database Resource Manager, qui agit côté base sur les sessions et ressources database. |
-| **IORM Plan** | Plan de gouvernance chargé sur les storage cells, décrivant comment les ressources I/O doivent être partagées entre bases, catégories ou workloads. | Un plan donne une priorité plus élevée à la catégorie `OLTP` qu’à la catégorie `REPORTING` pendant les heures ouvrées. | Un plan d’exécution SQL ou un plan de sauvegarde RMAN. |
-| **Database Resource Manager** | Fonction Oracle Database permettant de classifier et contrôler les sessions côté base à travers des plans, consumer groups et directives. | Les sessions du service `APP_OLTP` sont placées dans un consumer group prioritaire, tandis que `APP_REPORTING` est classé séparément. | IORM, qui arbitre l’accès I/O dans les storage cells. |
-| **Consumer Group** | Groupe logique utilisé par Database Resource Manager pour classifier des sessions selon leur rôle, service, utilisateur ou module applicatif. | Les connexions du batch de chargement appartiennent au consumer group `BATCH_LOAD`. | Un service RAC, même si le service peut servir à classer des sessions. |
-| **Category Plan** | Approche de planification IORM fondée sur des catégories de workload plutôt que sur une base unique. | Les catégories `OLTP`, `REPORTING`, `BATCH` et `BACKUP` reçoivent des parts différentes. | Un plan interdatabase limité à une hiérarchie entre bases. |
-| **Database Plan** | Politique de répartition I/O à l’échelle d’une base ou d’un ensemble de bases identifiées. | La base de facturation reçoit plus de ressources I/O que la base de reporting interne. | Un consumer group interne à une base. |
-| **Interdatabase Plan** | Plan qui arbitre les ressources I/O entre plusieurs bases de données partageant les mêmes storage cells. | `PROD_FINANCE` est prioritaire sur `DWH_REPORTING` en journée. | Un plan intrabase qui ne concerne que des groupes de sessions dans une même base. |
-| **Noisy Neighbor** | Workload qui consomme de manière disproportionnée une ressource partagée et dégrade les autres workloads. | Un scan complet non sélectif lancé par le reporting augmente la latence de l’OLTP. | Une panne matérielle ou une saturation CPU locale non liée à la concurrence I/O. |
-| **OLTP** | Workload transactionnel orienté latence, avec de nombreuses opérations courtes et sensibles au temps de réponse. | Saisie de commandes, paiement, réservation ou validation de transactions. | Workload analytique orienté débit et scans volumineux. |
-| **Reporting** | Workload de consultation ou d’analyse produisant souvent des lectures importantes et des agrégations. | Tableau de bord commercial lisant plusieurs mois d’historique. | Batch de transformation ou sauvegarde. |
-| **Batch** | Traitement planifié, souvent volumineux, exécutant des chargements, calculs ou transformations. | Chargement nocturne de tables de faits dans un entrepôt. | Requête interactive utilisateur. |
-| **Backup** | Opération de protection ou restauration des données, typiquement via RMAN, pouvant consommer du débit I/O important. | Sauvegarde incrémentale lancée pendant une fenêtre de maintenance. | Réplication Data Guard ou export logique. |
-| **Flash Cache** | Couche flash des storage cells utilisée pour accélérer les lectures ou écritures selon les mécanismes Exadata. | Les blocs chauds d’une application OLTP bénéficient d’un accès flash à faible latence. | Buffer cache de l’instance Oracle Database. |
-| **Storage Cell** | Serveur de stockage Exadata exécutant Exadata System Software, CellCLI, services iDB, offload SQL, flash cache et mécanismes IORM. | Une cell reçoit des requêtes iDB provenant de plusieurs database servers RAC. | Database server, où s’exécutent les instances Oracle. |
-| **I/O Latency** | Temps nécessaire pour servir une opération I/O, particulièrement critique pour les transactions courtes. | Une hausse de latence sur lectures physiques peut ralentir une application de paiement. | Débit total, qui mesure un volume par unité de temps. |
-| **I/O Throughput** | Volume d’I/O servi par unité de temps, important pour scans, batchs, sauvegardes et traitements analytiques. | Un reporting consomme plusieurs Go/s pendant une consolidation mensuelle. | Latence unitaire d’une opération courte. |
+Exemples :
 
-## 4. Architecture IORM
+```text
+un reporting volumineux ralentit l’OLTP
+un batch nocturne déborde sur la journée
+une sauvegarde RMAN consomme trop d’I/O
+une PDB de test perturbe une PDB de production
+une requête analytique scanne trop de données
+```
 
-IORM agit dans les **storage cells**, au plus près des ressources flash et disque. Les database servers exécutent les instances Oracle, les services RAC, les sessions applicatives et Database Resource Manager. Lorsqu’une session génère une lecture ou une écriture physique, la demande traverse la couche database, ASM et le protocole interne vers les cells. Si plusieurs workloads demandent simultanément des ressources I/O, les cells peuvent appliquer le plan IORM pour décider comment servir les requêtes selon les priorités définies.
+IORM permet aux Storage Cells d’arbitrer les ressources I/O lorsque plusieurs workloads sont concurrents.
 
-Le rôle des database servers reste déterminant. Ils hébergent les instances et exécutent les plans SQL, mais ils participent aussi à la classification des sessions via les services, les utilisateurs, les modules applicatifs ou Database Resource Manager. DBRM peut placer une session dans un **consumer group** ; cette information peut ensuite être cohérente avec une politique IORM côté stockage. La classification doit donc être pensée dès la connexion applicative, pas seulement au moment où la dégradation de performance apparaît.
+À retenir :
 
-Les storage cells appliquent la partie I/O de la politique. Elles reçoivent des requêtes issues de plusieurs database servers, potentiellement de plusieurs bases ou PDB, et elles observent la concurrence réelle sur les ressources. Le plan IORM devient pertinent lorsque la demande dépasse ou approche la capacité disponible. S’il n’y a pas de concurrence, un workload secondaire peut utiliser la capacité libre ; s’il y a concurrence, la priorité protège le workload critique.
+```text
+IORM ne sert pas à accélérer une requête isolée.
+IORM sert à protéger les workloads prioritaires quand les I/O sont partagées.
+```
 
-ASM intervient dans le modèle parce que les fichiers Oracle sont répartis dans des diskgroups qui s’appuient sur les cellules. IORM ne remplace pas ASM et ne change pas la redondance des diskgroups. Il arbitre l’accès aux ressources I/O lorsque plusieurs flux concurrents sollicitent ces ressources. C’est pourquoi un diagnostic doit relier la base, les services, ASM, les cells et les métriques de workload au lieu de regarder une seule couche.
+---
+
+## 3. Définition simple d’IORM
+
+IORM est un mécanisme Exadata de gestion des ressources I/O.
+
+Il agit dans les **Storage Cells**.
+
+Son rôle est de répartir les ressources disque et flash entre plusieurs workloads selon une politique définie.
+
+```text
+Database Servers
+→ demandes I/O concurrentes
+→ Storage Cells
+→ application du plan IORM
+→ priorisation selon criticité
+```
+
+IORM répond à une question simple :
+
+```text
+Quand tout le monde demande des I/O en même temps,
+qui doit passer en premier ?
+```
+
+---
+
+## 4. IORM n’est pas un mécanisme magique
+
+IORM ne corrige pas :
+
+```text
+un mauvais SQL
+un mauvais plan d’exécution
+des statistiques obsolètes
+un modèle de données mal conçu
+une requête qui lit trop
+un manque de capacité globale
+une panne matérielle
+une mauvaise configuration réseau
+```
+
+IORM contrôle la concurrence I/O.
+
+Il ne remplace pas :
+
+```text
+l’optimisation SQL
+le dimensionnement
+la gouvernance applicative
+la supervision
+le tuning database
+les bonnes pratiques RMAN
+```
+
+---
+
+## 5. Architecture IORM
+
+IORM agit dans les Storage Cells, au plus près des disques et de la flash.
+
+Schéma logique :
 
 ```mermaid
 flowchart LR
-    A[Sessions applicatives] --> B[Database Resource Manager]
-    B --> C[Consumer Groups]
+    A[Applications] --> B[Services Oracle]
+    B --> C[Database Resource Manager]
     C --> D[Database Servers]
-    D --> E[Requêtes I/O vers Storage Cells]
-    E --> F[IORM Plan dans les Cells]
-    F --> G1[OLTP prioritaire]
-    F --> G2[Reporting contrôlé]
-    F --> G3[Batch limité]
-    F --> G4[Backup encadré]
-    G1 --> H[Disques / Flash]
-    G2 --> H
-    G3 --> H
-    G4 --> H
+    D --> E[Demandes I/O]
+    E --> F[Storage Cells]
+    F --> G[IORM Plan]
+    G --> H1[OLTP prioritaire]
+    G --> H2[Reporting contrôlé]
+    G --> H3[Batch limité]
+    G --> H4[Backup encadré]
+    H1 --> I[Flash / Disques]
+    H2 --> I
+    H3 --> I
+    H4 --> I
 ```
 
-| Couche | Responsabilité | Preuve de lecture typique |
+Lecture :
+
+```text
+1. L’application se connecte à un service.
+2. Oracle Database peut classifier la session.
+3. Le Database Server émet des demandes I/O.
+4. Les Storage Cells reçoivent les demandes concurrentes.
+5. IORM applique une politique de priorité.
+6. Les ressources flash/disque sont partagées selon cette politique.
+```
+
+---
+
+## 6. IORM vs Database Resource Manager
+
+IORM et Database Resource Manager sont complémentaires.
+
+| Sujet | Database Resource Manager | IORM |
 |---|---|---|
-| Application | Utilise un service ou un module permettant d’identifier le workload. | Nom du service, module, action ou utilisateur de connexion. |
-| Database Resource Manager | Classe les sessions et applique des règles côté base. | Vues Resource Manager, consumer groups actifs, plan DBRM activé. |
-| Database servers | Exécutent les instances et émettent les demandes I/O vers les cells. | ASH, AWR, événements `cell%`, statistiques physiques. |
-| ASM | Fournit les diskgroups et l’accès aux fichiers Oracle. | Répartition des diskgroups, redondance, métriques ASM pertinentes. |
-| Storage cells | Appliquent IORM et servent les I/O via flash et disques. | `cellcli`, plan IORM, métriques cellule, latence et débit par catégorie. |
+| Où agit-il ? | Dans Oracle Database | Dans les Storage Cells |
+| Ressource principale | Sessions, CPU, parallélisme, consumer groups | I/O disque et flash |
+| Niveau | Base / PDB / sessions | Stockage Exadata |
+| But | Classifier et contrôler les sessions | Prioriser les I/O |
+| Exemple | Mettre le reporting dans un consumer group | Donner moins d’I/O au reporting en concurrence |
+| Composant | Database Server | Storage Cell |
 
-## 5. Fonctionnement détaillé
+À retenir :
 
-Le fonctionnement d’IORM doit être compris comme une chaîne de décision. Une session applicative arrive dans la base par un service, un utilisateur ou un module. Database Resource Manager peut classifier cette session dans un consumer group. La session exécute ensuite du SQL, qui peut générer des lectures physiques, des écritures, des smart scans ou des accès plus classiques. Lorsque les demandes atteignent les storage cells, celles-ci disposent d’un contexte suffisant pour appliquer une politique IORM si un plan est configuré et si la concurrence justifie un arbitrage.
+```text
+Database Resource Manager classe les sessions côté base.
+IORM arbitre les I/O côté Storage Cell.
+Les deux peuvent fonctionner ensemble.
+```
 
-La première décision consiste à définir ce que l’on veut protéger. Sur Exadata, l’objectif n’est pas toujours de maximiser le débit total. Dans un environnement OLTP, une faible latence peut être plus importante qu’un débit global élevé. Dans un environnement analytique, le débit peut être prioritaire pendant certaines fenêtres. Dans un environnement mixte, la bonne politique varie selon l’heure, la criticité et les engagements de service. IORM donne un cadre pour exprimer cette hiérarchie.
+---
 
-La deuxième décision consiste à choisir le niveau de gouvernance. Un plan interdatabase est pertinent lorsque plusieurs bases indépendantes partagent les mêmes cells. Un plan par catégorie devient utile lorsque l’on veut distinguer OLTP, reporting, batch et backup. Un alignement avec Database Resource Manager devient indispensable lorsque la priorité dépend de sessions ou services à l’intérieur d’une base. Une erreur fréquente consiste à configurer une priorité côté stockage sans s’assurer que les sessions sont correctement identifiées côté base.
+## 7. Notion de workload
 
-La troisième décision concerne la preuve opérationnelle. Avant de modifier un plan, il faut démontrer qu’il existe bien une concurrence I/O et que cette concurrence affecte le workload critique. Les événements d’attente `cell%`, les statistiques AWR/ASH, les métriques de débit, les métriques de latence et les informations CellCLI doivent être lus ensemble. Si le problème vient d’un plan SQL catastrophique, d’une absence de partition pruning, d’un problème CPU ou d’un problème réseau, IORM peut masquer le symptôme sans corriger la cause.
+Un workload est une charge applicative identifiable.
 
-Le mécanisme devient particulièrement puissant lorsque le plan respecte trois principes. D’abord, il doit être **explicite** : chaque priorité est justifiée par une criticité ou une fenêtre métier. Ensuite, il doit être **mesurable** : on doit pouvoir vérifier son effet par des métriques avant/après. Enfin, il doit être **réversible** : toute modification doit être documentée, validée et associée à une procédure de retour arrière.
+Exemples :
 
-| Étape | Question technique | Risque si l’étape est ignorée |
+| Workload | Caractéristiques | Sensibilité |
 |---|---|---|
-| Identifier les workloads | Qui consomme les I/O et à quel moment ? | Le plan protège le mauvais service ou limite un traitement légitime. |
-| Classifier les sessions | Les sessions sont-elles rattachées aux bons services ou consumer groups ? | IORM reçoit une classification incohérente ou trop grossière. |
-| Lire le plan actif | Quel plan est réellement appliqué dans les cells ? | L’équipe raisonne sur une configuration théorique non chargée. |
-| Mesurer la concurrence | La dégradation correspond-elle à une contention I/O observable ? | IORM est accusé alors que la cause est SQL, CPU, réseau ou application. |
-| Proposer la politique | Quelle priorité reflète le SLA et la criticité ? | Le plan devient politique, non technique, et crée des effets de bord. |
+| OLTP critique | Transactions courtes, commits fréquents | Latence |
+| Reporting | Scans, agrégations, lectures volumineuses | Débit |
+| Batch | Traitements planifiés, volumes importants | Fenêtre d’exécution |
+| Backup RMAN | Lecture massive, écriture vers cible | Débit et fenêtre backup |
+| Test / Dev | Non critique | Priorité basse |
+| Maintenance | Rebuild, purge, chargements | Planification |
 
-## 6. Exemple concret
+IORM devient utile lorsque ces workloads partagent les mêmes Storage Cells.
 
-Considérons une plateforme Exadata hébergeant trois usages principaux. La base `CRM_PROD` sert une application OLTP de relation client. La base `DWH_PROD` exécute des reportings volumineux pour les équipes métiers. Une sauvegarde RMAN quotidienne démarre en fin de nuit, mais elle déborde parfois sur le début de la journée. À 09 h 15, les utilisateurs CRM constatent une hausse du temps de réponse lors de la consultation et de la mise à jour des dossiers clients.
+---
 
-Une analyse superficielle pourrait conclure que la plateforme est simplement saturée. Une analyse IORM correcte cherche plutôt à répondre à une question précise : **un workload secondaire consomme-t-il des ressources I/O partagées au moment où l’OLTP a besoin d’une latence stable ?** Cette question impose de corréler l’heure de la dégradation, les services actifs, les sessions consommatrices, les événements d’attente côté base, le plan IORM chargé dans les cells et les métriques de latence ou débit côté stockage.
+## 8. Noisy Neighbor
 
-Dans ce scénario, la matrice de décision pourrait être la suivante. Elle ne constitue pas une configuration universelle ; elle illustre la manière de transformer un besoin métier en politique I/O justifiée.
+### 8.1 Définition
 
-| Workload | Fenêtre normale | Priorité proposée | Justification | Preuve attendue |
-|---|---|---:|---|---|
-| `CRM_PROD` OLTP | 08 h – 19 h | Très haute | Transactions utilisateur sensibles à la latence. | Attentes `cell single block physical read`, ASH par service, métriques de latence. |
-| `DWH_PROD` Reporting | 07 h – 22 h | Moyenne | Reporting utile mais tolérant à un ralentissement. | Débit de scans, SQL_ID consommateurs, période d’exécution. |
-| Batch chargement | Nuit | Basse en journée, moyenne la nuit | Ne doit pas perturber les heures ouvrées. | Sessions batch, volumes lus/écrits, fenêtre réelle. |
-| Sauvegarde RMAN | Fin de nuit | Encadrée | Protection des données nécessaire mais contrôlable. | Canaux RMAN actifs, débit backup, impact sur latence OLTP. |
+Un **noisy neighbor** est un workload qui consomme beaucoup de ressources partagées et dégrade les autres.
 
-La recommandation ne doit pas être de « mettre l’OLTP au maximum » sans preuve. Elle doit dire : les mesures montrent que les attentes I/O OLTP augmentent lorsque reporting et sauvegarde consomment simultanément les cells ; le plan IORM doit donc garantir une priorité OLTP en journée, limiter reporting et backup lorsque la demande OLTP est forte, puis relâcher la contrainte pendant les fenêtres creuses.
+Exemple :
 
-## 7. Commandes, vues et métriques utiles
+```text
+Une requête reporting scanne plusieurs téraoctets.
+Elle consomme beaucoup d’I/O.
+L’application OLTP critique voit sa latence augmenter.
+```
 
-Les commandes suivantes sont données pour construire un diagnostic de lecture. Elles doivent être exécutées avec les privilèges appropriés, adaptées à la version Oracle, aux conventions du site et aux règles de sécurité locales. Dans un atelier, elles servent à apprendre le raisonnement ; en production, elles doivent être intégrées à un runbook validé.
+### 8.2 Symptômes possibles
 
-```bash
-cellcli -e "list iormplan detail"
-cellcli -e "list metriccurrent where name like 'IORM%' detail"
-cellcli -e "list metriccurrent where name like 'CD_IO%' detail"
+```text
+hausse de latence I/O
+attentes cell plus élevées
+dégradation OLTP
+batch plus long
+sauvegarde qui dépasse sa fenêtre
+plaintes applicatives simultanées
+```
+
+### 8.3 Diagnostic
+
+On ne conclut pas directement à un noisy neighbor.
+
+Il faut vérifier :
+
+```text
+qui consomme
+quand
+sur quelles bases ou PDB
+avec quels SQL_ID
+avec quels événements d’attente
+sur quelles Storage Cells
+avec quelle politique IORM active
+```
+
+---
+
+## 9. IORM Plan
+
+Un IORM Plan décrit comment les ressources I/O doivent être réparties.
+
+Il peut refléter :
+
+```text
+criticité métier
+SLA
+fenêtre batch
+priorité OLTP
+priorité reporting
+environnements prod / non-prod
+bases critiques / non critiques
+PDB critiques / non critiques
+backup contrôlé
+```
+
+Exemple de logique :
+
+| Workload | Priorité | Justification |
+|---|---|---|
+| Paiement OLTP | Haute | Transaction temps réel, impact métier direct |
+| Core banking | Haute | Criticité production |
+| Reporting journée | Moyenne | Important mais moins sensible que l’OLTP |
+| Batch nuit | Moyenne / basse selon horaire | Peut utiliser capacité libre hors pic |
+| Backup RMAN | Contrôlée | Nécessaire mais ne doit pas saturer l’OLTP |
+| Test / Dev | Basse | Non critique |
+
+---
+
+## 10. Category Plan et Database Plan
+
+### 10.1 Category Plan
+
+Un Category Plan classe les workloads par catégories.
+
+Exemples :
+
+```text
+OLTP
+REPORTING
+BATCH
+BACKUP
+TEST
+```
+
+Avantage :
+
+```text
+La politique est alignée sur la nature de la charge.
+```
+
+### 10.2 Database Plan
+
+Un Database Plan répartit les ressources entre bases.
+
+Exemples :
+
+```text
+PROD_PAYMENT prioritaire
+PROD_DWH contrôlé
+RECETTE basse priorité
+DEV basse priorité
+```
+
+Avantage :
+
+```text
+La politique est alignée sur les bases ou environnements.
+```
+
+### 10.3 Choix
+
+Le choix dépend de l’architecture.
+
+```text
+Si les bases ont une criticité claire : Database Plan.
+Si les workloads sont mieux décrits par usage : Category Plan.
+Si plusieurs PDB partagent une base : gouvernance PDB / services / consumer groups à prévoir.
+```
+
+---
+
+## 11. Matrice workload / priorité / justification
+
+Avant toute configuration IORM, il faut produire une matrice.
+
+Exemple :
+
+| Workload | Base / PDB / Service | Période | Criticité | Priorité I/O | Justification | Preuve attendue |
+|---|---|---|---|---|---|---|
+| OLTP paiement | PAYPROD / svc_pay | 24/7 | Très haute | Haute | Transactions clients | Latence I/O, ASH, SLA |
+| Reporting | DWH / svc_rep | Journée | Moyenne | Moyenne | Décisionnel | SQL_ID, scans, débit |
+| Batch chargement | DWH / svc_batch | Nuit | Moyenne | Moyenne nuit / basse jour | Fenêtre batch | Durée batch, I/O |
+| Backup RMAN | Toutes bases | Nuit | Haute mais contrôlée | Encadrée | Recovery | Débit backup, fenêtre |
+| Test | PDB_TEST | Journée | Basse | Basse | Non critique | Consommation I/O |
+
+À retenir :
+
+```text
+Une politique IORM doit être justifiée.
+On ne met pas une priorité haute simplement parce qu’une équipe la demande.
+```
+
+---
+
+## 12. Métriques et preuves à collecter
+
+Avant de proposer une politique IORM, il faut collecter des preuves.
+
+### 12.1 Côté base
+
+```sql
+select event, total_waits, time_waited
+from v$system_event
+where event like 'cell%'
+order by time_waited desc;
 ```
 
 ```sql
-select name, is_top_plan
-from v$rsrc_plan
-order by name;
-
-select plan, group_or_subplan, mgmt_p1, mgmt_p2, mgmt_p3, status
-from dba_rsrc_plan_directives
-order by plan, group_or_subplan;
-
-select sid, serial#, username, service_name, module, action, resource_consumer_group
-from v$session
-where type = 'USER'
-order by service_name, username;
-
-select event, total_waits, time_waited_micro
-from v$system_event
+select inst_id, sql_id, event, count(*)
+from gv$active_session_history
 where event like 'cell%'
-order by time_waited_micro desc;
+group by inst_id, sql_id, event
+order by count(*) desc;
 ```
 
-| Élément à lire | Interprétation |
+### 12.2 Côté SQL
+
+```sql
+select *
+from table(dbms_xplan.display_cursor(null, null, 'ALLSTATS LAST +PREDICATE'));
+```
+
+À lire :
+
+```text
+SQL_ID
+plan d’exécution
+TABLE ACCESS STORAGE FULL
+bytes lus
+bytes retournés
+attentes cell
+```
+
+### 12.3 Côté Storage Cells
+
+```bash
+cellcli -e "list metriccurrent"
+cellcli -e "list metriccurrent where objectType = 'CELL'"
+cellcli -e "list cell detail"
+```
+
+### 12.4 Côté IORM
+
+Selon version et configuration :
+
+```bash
+cellcli -e "list iormplan"
+cellcli -e "list iormplan detail"
+```
+
+À vérifier :
+
+```text
+plan actif ou non
+catégories
+bases concernées
+priorités
+limites
+objectifs
+```
+
+---
+
+## 13. Méthode de diagnostic noisy neighbor
+
+### Étape 1 — Identifier la période
+
+```text
+Quand la dégradation apparaît-elle ?
+Pendant batch ?
+Pendant reporting ?
+Pendant backup ?
+Pendant pic OLTP ?
+```
+
+### Étape 2 — Identifier les consommateurs
+
+```text
+SQL_ID
+service
+module
+base
+PDB
+consumer group
+workload RMAN
+```
+
+### Étape 3 — Lire les attentes
+
+```text
+cell smart table scan
+cell single block physical read
+cell multiblock physical read
+log file sync
+log file parallel write
+```
+
+### Étape 4 — Lire les cells
+
+```text
+métriques I/O
+latence
+débit
+utilisation flash/disque
+alertes
+```
+
+### Étape 5 — Vérifier le plan IORM
+
+```text
+IORM actif ?
+plan adapté ?
+workload correctement classé ?
+priorités cohérentes ?
+```
+
+### Étape 6 — Conclure prudemment
+
+```text
+Ce qui est prouvé
+Ce qui reste incertain
+Ce qui doit être testé
+Ce qui demande validation CAB/runbook
+```
+
+---
+
+## 14. Exemple concret
+
+### Situation
+
+Une application de paiement ralentit entre 9h et 10h.
+
+Dans la même période, un reporting lit de gros volumes sur la même plateforme Exadata.
+
+### Mauvaise conclusion
+
+```text
+Le reporting ralentit le paiement, il faut le couper.
+```
+
+### Bonne démarche
+
+```text
+1. Identifier les SQL_ID du reporting.
+2. Vérifier les attentes cell côté paiement.
+3. Vérifier les métriques cells.
+4. Vérifier si IORM est actif.
+5. Vérifier les services et consumer groups.
+6. Vérifier la fenêtre réelle du reporting.
+7. Proposer une priorité I/O si la concurrence est prouvée.
+```
+
+### Conclusion prudente
+
+```text
+Les métriques montrent une concurrence I/O entre le reporting et l’OLTP
+sur la même période. Une politique IORM peut être proposée pour protéger
+l’OLTP pendant les heures ouvrées, sans interdire le reporting.
+```
+
+---
+
+## 15. Ce qu’IORM apporte
+
+| Problème | Apport IORM |
 |---|---|
-| Plan IORM actif | Confirme si les storage cells appliquent une politique ou si l’environnement fonctionne sans arbitrage explicite. |
-| Directives DBRM | Indiquent comment les sessions sont classées côté base et si cette classification peut alimenter une logique IORM cohérente. |
-| `resource_consumer_group` dans `v$session` | Montre si les sessions OLTP, reporting, batch et backup sont effectivement séparées. |
-| Événements `cell%` | Révèlent la part du temps d’attente associée aux accès Exadata côté instance. |
-| Métriques IORM des cells | Montrent l’activité ou l’effet d’un plan IORM côté stockage. |
-| Latence I/O par workload | Permet de vérifier si le workload prioritaire conserve une latence acceptable. |
-| Débit I/O par workload | Permet de distinguer un workload ralenti volontairement d’un workload bloqué par problème. |
+| Reporting consomme trop en journée | Reporting ralenti si OLTP concurrent |
+| Backup dépasse sur heures ouvrées | Backup contrôlé pendant pic métier |
+| Test/dev perturbe prod | Priorité basse aux environnements non critiques |
+| Plusieurs bases partagent les cells | Répartition par criticité |
+| Consolidation PDB | Priorisation selon services ou catégories |
+| Noisy neighbor | Encadrement des workloads consommateurs |
 
-Les métriques doivent toujours être datées. Une capture isolée sans période de référence ne suffit pas. Il faut comparer la période dégradée à une période saine, puis relier la variation au workload actif. Le diagnostic IORM devient robuste lorsque les preuves base et cells racontent la même histoire.
+---
 
-## 8. Interprétation des résultats
+## 16. Limites d’IORM
 
-L’interprétation commence par la distinction entre **contention**, **priorisation** et **mauvaise conception du workload**. Une contention signifie que plusieurs flux demandent simultanément plus de ressources I/O que ce qui peut être servi sans impact. Une priorisation signifie que le plan attribue volontairement plus de ressources à certains workloads. Une mauvaise conception du workload signifie qu’un SQL, un batch ou une sauvegarde consomme trop parce qu’il est mal borné, mal planifié ou mal optimisé.
+IORM ne suffit pas si :
 
-Si les sessions OLTP attendent davantage sur des événements `cell%` pendant qu’un reporting ou un batch produit un débit très élevé, l’hypothèse IORM devient plausible. Si le plan IORM est absent ou trop permissif, la recommandation peut viser une politique de priorité. Si le plan existe mais que les sessions sont toutes dans le même consumer group, la correction doit d’abord porter sur Database Resource Manager ou sur la classification par service. Si les métriques IORM montrent que le workload secondaire est déjà limité, il faut chercher ailleurs : SQL non sélectif, contention CPU, verrouillage applicatif, saturation réseau ou problème cell.
+```text
+la plateforme est sous-dimensionnée
+le SQL est très mal écrit
+la requête lit inutilement trop de données
+la politique métier est absente
+les services ne permettent pas d’identifier les workloads
+les sessions ne sont pas classées correctement
+les sauvegardes sont mal planifiées
+les métriques ne prouvent pas une concurrence I/O
+```
 
-| Observation | Interprétation possible | Action de diagnostic suivante |
-|---|---|---|
-| Plan IORM absent sur plateforme consolidée | Les workloads concurrents ne sont pas explicitement arbitrés côté cells. | Cartographier workloads et criticité avant de proposer un plan. |
-| Plan IORM présent mais sessions non classées | La politique de stockage manque d’information métier ou technique. | Vérifier services, consumer groups et DBRM. |
-| OLTP en attente `cell%` pendant reporting massif | Noisy neighbor I/O possible. | Corréler ASH, SQL_ID, débit cell et période métier. |
-| Reporting ralenti mais OLTP stable | IORM peut fonctionner comme attendu. | Vérifier que le ralentissement respecte le SLA reporting. |
-| Sauvegarde active pendant pic OLTP | Fenêtre ou intensité backup à revoir. | Lire canaux RMAN, débit, horaires et impact sur latence. |
-| Toutes les charges dégradées sans workload dominant | Saturation globale ou problème infrastructure possible. | Vérifier cells, réseau, CPU database servers et alertes. |
+À retenir :
 
-Une interprétation correcte ne se limite jamais à « IORM est bon » ou « IORM est mauvais ». Elle précise ce qui est prouvé, ce qui reste incertain et ce qui doit être testé. Elle sépare les constats de lecture des décisions de changement. Elle explique aussi le risque métier : par exemple, augmenter la priorité OLTP peut protéger les transactions, mais rallonger les traitements de reporting ou la sauvegarde. Cette conséquence doit être acceptée par les responsables du service.
+```text
+IORM est un outil de gouvernance I/O.
+Il ne remplace pas l’analyse de performance.
+```
 
-## 9. Erreurs fréquentes
+---
 
-| Erreur | Cause probable | Correction pédagogique |
-|---|---|---|
-| Confondre IORM et Database Resource Manager | Les deux mécanismes participent à la gouvernance, mais pas au même niveau. | Expliquer que DBRM classe et contrôle côté base, tandis qu’IORM arbitre côté storage cells. |
-| Créer un plan IORM sans classification fiable | Les services, modules ou consumer groups ne distinguent pas les workloads réels. | Commencer par cartographier les connexions applicatives et les consumer groups. |
-| Donner une priorité maximale à tout ce qui est production | Absence d’arbitrage métier réel. | Hiérarchiser selon latence, criticité, fenêtre et impact. |
-| Limiter un batch sans vérifier le SQL | Le batch est peut-être inefficace ou non sélectif. | Lire SQL_ID, plan d’exécution, volumes lus et éligibilité offload avant de conclure. |
-| Accuser IORM alors que le plan n’est pas actif | La configuration supposée n’est pas chargée ou pas appliquée. | Lire `list iormplan detail` sur les cells concernées. |
-| Ignorer les sauvegardes | RMAN peut consommer fortement les ressources pendant des fenêtres sensibles. | Inclure backup dans la matrice workload / priorité. |
-| Lire une seule métrique | Une latence ou un débit isolé ne prouve pas la cause. | Croiser ASH/AWR, CellCLI, horaires, services et SQL consommateurs. |
-| Modifier en production sans retour arrière | La pression problème pousse à changer trop vite. | Documenter la modification, l’objectif, la mesure de succès et la procédure de rollback. |
+## 17. Bonnes pratiques
 
-La plus grave de ces erreurs est de transformer IORM en outil de compensation permanente. Si un reporting lit trop parce qu’il ignore des prédicats, si un batch déborde parce qu’il est mal planifié ou si une sauvegarde est lancée au mauvais moment, IORM peut réduire l’impact mais ne doit pas devenir l’unique réponse. Une politique saine protège le service critique tout en déclenchant l’amélioration du workload perturbateur.
-
-## 10. Bonnes pratiques
-
-| Bonne pratique | Application concrète |
+| Bonne pratique | Application |
 |---|---|
-| Définir les workloads avant le plan | Nommer OLTP, reporting, batch, backup, maintenance et préciser leurs fenêtres. |
-| Aligner services, DBRM et IORM | Utiliser les services et consumer groups pour que la politique technique reflète les usages réels. |
-| Protéger la latence critique | Prioriser les applications transactionnelles sensibles pendant leurs heures de service. |
-| Encadrer les charges volumineuses | Donner une place au reporting, batch et backup sans les laisser perturber l’OLTP. |
-| Mesurer avant et après | Comparer latence, débit, attentes `cell%` et durée des traitements. |
-| Documenter la justification | Chaque priorité doit avoir une raison métier et technique. |
-| Prévoir le retour arrière | Toute modification de plan doit pouvoir être annulée proprement. |
-| Réviser périodiquement le plan | Les usages changent ; un plan valide aujourd’hui peut devenir inadapté après migration ou consolidation. |
+| Partir du métier | Classer les workloads selon criticité réelle |
+| Mesurer avant de changer | AWR, ASH, CellCLI, métriques I/O |
+| Identifier les services | Services RAC clairs par application |
+| Séparer OLTP / reporting / batch | Matrice workload propre |
+| Protéger sans bloquer | IORM limite ou priorise, il ne doit pas casser l’exploitation |
+| Documenter la politique | Justification, période, owner, preuve |
+| Tester progressivement | Éviter un changement brutal |
+| Revoir régulièrement | La charge évolue |
 
-Une bonne pratique spécifique à Exadata consiste à ne pas séparer artificiellement performance et exploitation. Le plan IORM doit être connu des équipes DBA, infrastructure, support et métiers. Lorsqu’un problème survient, chacun doit comprendre que le ralentissement d’un reporting peut être un comportement attendu si l’OLTP est protégé. Inversement, si tous les workloads souffrent, le plan IORM ne doit pas masquer une saturation globale ou un défaut matériel.
+---
 
-Il est également recommandé de conserver une matrice de décision dans le référentiel d’exploitation. Cette matrice doit préciser le propriétaire applicatif, la criticité, la fenêtre de service, les métriques de succès et la priorité I/O. Elle sert de base aux discussions CAB, aux revues de capacité et aux analyses post-problème.
+## 18. Commandes read-only utiles
 
-## 11. Exercice pratique
+### 18.1 Lire les événements cell
 
-Vous administrez une plateforme Exadata consolidée hébergeant les workloads suivants : `PAY_OLTP`, `CRM_OLTP`, `DWH_REPORTING`, `LOAD_BATCH` et `RMAN_BACKUP`. Depuis trois jours, les utilisateurs de `PAY_OLTP` signalent une hausse du temps de réponse entre 08 h 30 et 10 h 00. Les premiers éléments indiquent que `DWH_REPORTING` lance des requêtes analytiques longues dès 08 h 00 et que `RMAN_BACKUP` termine parfois après 09 h 00.
+```sql
+select event, total_waits, time_waited
+from v$system_event
+where event like 'cell%'
+order by time_waited desc;
+```
 
-Votre travail consiste à produire une analyse structurée de diagnostic IORM. Vous ne devez pas proposer immédiatement une modification. Vous devez d’abord établir ce qui peut être prouvé en lecture seule, puis construire une matrice workload / priorité / justification.
+### 18.2 Identifier les SQL consommateurs
 
-Le livrable attendu doit contenir cinq parties. La première partie décrit les workloads et leur criticité. La deuxième indique les commandes ou vues read-only à exécuter côté base et côté cells. La troisième précise les métriques à comparer pendant la période dégradée et pendant une période saine. La quatrième propose une matrice de priorisation I/O. La cinquième formule une recommandation prudente, incluant ce qui invaliderait l’hypothèse IORM.
+```sql
+select inst_id, sql_id, event, count(*) as samples
+from gv$active_session_history
+where event like 'cell%'
+group by inst_id, sql_id, event
+order by samples desc;
+```
 
-| Workload | Informations fournies | Question à résoudre |
+### 18.3 Lire les services
+
+```sql
+select inst_id, name, network_name
+from gv$services
+order by inst_id, name;
+```
+
+### 18.4 Lire les métriques cells
+
+```bash
+cellcli -e "list metriccurrent"
+cellcli -e "list metriccurrent where objectType = 'CELL'"
+```
+
+### 18.5 Lire le plan IORM
+
+```bash
+cellcli -e "list iormplan"
+cellcli -e "list iormplan detail"
+```
+
+### 18.6 Lire les alertes cells
+
+```bash
+cellcli -e "list alert history"
+```
+
+---
+
+## 19. Erreurs fréquentes
+
+| Erreur | Pourquoi c’est dangereux | Correction |
 |---|---|---|
-| `PAY_OLTP` | Paiement en ligne, sensible à la latence, pic le matin. | Doit-il recevoir la priorité la plus haute entre 08 h et 19 h ? |
-| `CRM_OLTP` | Application interne importante mais moins critique que le paiement. | Quelle priorité relative face à `PAY_OLTP` ? |
-| `DWH_REPORTING` | Requêtes longues démarrant à 08 h. | Doit-il être ralenti pendant le pic OLTP ? |
-| `LOAD_BATCH` | Chargement nocturne pouvant déborder. | Quelle limite appliquer s’il dépasse sa fenêtre ? |
-| `RMAN_BACKUP` | Sauvegarde nécessaire mais parfois active après 09 h. | Comment préserver la protection des données sans dégrader l’OLTP ? |
+| Mettre tout en priorité haute | Plus aucune priorité réelle | Classer selon criticité |
+| Configurer sans métriques | Décision non prouvée | Collecter AWR/ASH/CellCLI |
+| Confondre DBRM et IORM | Mauvais niveau d’action | DBRM côté base, IORM côté cell |
+| Couper les workloads secondaires | Risque métier ou backup | Contrôler plutôt que bloquer |
+| Ignorer les services RAC | Workloads mal identifiés | Définir services par application |
+| Penser qu’IORM optimise le SQL | IORM ne réécrit pas la requête | Optimiser SQL séparément |
+| Oublier la période | Priorité différente jour/nuit | Documenter fenêtres |
 
-Votre réponse doit inclure au minimum trois commandes ou vues, deux métriques côté base, deux métriques côté cells, une matrice de priorité et une justification par workload.
+---
 
-## 12. Corrigé de l’exercice
+## 20. Exercice pratique
 
-Une bonne réponse commence par refuser la conclusion immédiate. Le fait que `DWH_REPORTING` et `RMAN_BACKUP` soient actifs pendant la dégradation ne prouve pas encore qu’ils causent la dégradation. Il faut d’abord vérifier que `PAY_OLTP` attend réellement sur des événements liés aux cells, que la période correspond aux charges concurrentes, que le plan IORM est absent ou insuffisant, et que les sessions sont correctement classées.
+Une plateforme Exadata héberge :
 
-Côté base, le diagnostic peut commencer par les sessions, services et consumer groups. Une requête sur `v$session` permet de vérifier si `PAY_OLTP`, `DWH_REPORTING` et `RMAN_BACKUP` sont visibles comme services ou modules distincts. Les vues Resource Manager permettent de vérifier si un plan DBRM est actif et si les consumer groups reflètent les workloads. Les événements `cell%` et ASH/AWR permettent ensuite de déterminer si la dégradation de `PAY_OLTP` est bien corrélée à des attentes I/O Exadata.
+```text
+PAYPROD : application paiement OLTP critique
+DWHREP : reporting décisionnel
+BATCHFIN : batch financier de nuit
+RMAN : sauvegarde quotidienne
+PDB_TEST : environnement de test
+```
 
-Côté cells, `cellcli -e "list iormplan detail"` permet de savoir si un plan IORM est réellement chargé. Les métriques IORM et les métriques de débit ou latence permettent d’observer si une catégorie ou une base consomme fortement les ressources. Si les cells montrent une forte activité reporting et backup pendant que `PAY_OLTP` accumule des attentes I/O, l’hypothèse noisy neighbor devient crédible.
+Entre 9h et 11h, PAYPROD ralentit.  
+Dans la même période, DWHREP exécute plusieurs scans volumineux.
 
-La matrice de priorisation pourrait être la suivante, sous réserve de validation par les métriques.
+Répondez :
 
-| Workload | Priorité proposée | Justification | Condition de validité |
-|---|---:|---|---|
-| `PAY_OLTP` | Très haute | Paiement en ligne, forte sensibilité à la latence, impact direct utilisateur et chiffre d’affaires. | Les attentes `cell%` augmentent pendant la concurrence I/O. |
-| `CRM_OLTP` | Haute | Application importante mais moins critique que le paiement. | Le SLA CRM accepte une priorité inférieure à paiement. |
-| `DWH_REPORTING` | Moyenne en journée, haute hors pic | Reporting utile mais tolérant à un ralentissement temporaire. | Les métiers acceptent une fenêtre ou un ralentissement. |
-| `LOAD_BATCH` | Basse en journée, moyenne la nuit | Le batch doit rester dans sa fenêtre et ne pas perturber les transactions. | Le traitement peut être replanifié ou limité sans rupture métier. |
-| `RMAN_BACKUP` | Encadrée | La sauvegarde protège les données, mais son débit doit respecter les heures critiques. | Le RPO/RTO reste respecté malgré l’encadrement. |
+1. Pourquoi IORM peut être utile ?
+2. Quelles preuves faut-il collecter avant de proposer un plan ?
+3. Comment distinguer IORM et Database Resource Manager ?
+4. Quelle matrice workload / priorité proposer ?
+5. Quelle conclusion prudente formuler ?
 
-La recommandation prudente est donc la suivante : si les preuves confirment une concurrence I/O, mettre en place ou ajuster un plan IORM aligné avec DBRM afin de protéger `PAY_OLTP` et `CRM_OLTP` pendant les heures ouvrées, tout en limitant `DWH_REPORTING`, `LOAD_BATCH` et `RMAN_BACKUP` lorsque la demande OLTP est forte. La recommandation doit être accompagnée d’une mesure avant/après : latence OLTP, temps d’attente `cell%`, durée des reportings, durée de sauvegarde et débit côté cells.
+---
 
-L’hypothèse IORM serait invalidée si `PAY_OLTP` ne présente pas d’attentes I/O significatives, si les lenteurs viennent de verrous applicatifs, si le CPU database server est saturé, si le réseau interne présente des erreurs, si les SQL de paiement ont changé de plan ou si le reporting est déjà fortement limité par un plan actif. Dans ces cas, modifier IORM ne serait pas la bonne première réponse.
+## 21. Corrigé indicatif
 
-## 13. Synthèse à retenir
+IORM peut être utile parce que plusieurs workloads partagent les mêmes Storage Cells et que l’OLTP critique doit être protégé pendant les heures ouvrées.
 
-IORM est un mécanisme de gouvernance I/O propre à l’architecture Exadata. Il prend tout son sens lorsque plusieurs bases, PDB, services ou traitements partagent les mêmes storage cells. Son objectif n’est pas de rendre tous les workloads plus rapides, mais de faire respecter une hiérarchie de service lorsque la demande I/O devient concurrente.
+Preuves à collecter :
 
-Le point central du module est la distinction entre **Database Resource Manager** et **IORM**. DBRM aide à classifier et gouverner les sessions côté base ; IORM arbitre l’accès aux ressources I/O côté storage cells. Une politique efficace nécessite l’alignement des deux. Si les sessions ne sont pas correctement classées, le plan IORM risque d’être trop grossier. Si le plan IORM est absent, une classification DBRM seule ne protège pas nécessairement l’accès au stockage partagé.
+```text
+AWR sur la période
+ASH par SQL_ID et service
+wait events cell
+métriques Storage Cells
+plan IORM actif ou absent
+services RAC utilisés
+fenêtre reporting
+latence observée par PAYPROD
+```
 
-La démarche professionnelle repose sur la preuve. Avant de modifier une priorité, l’administrateur doit vérifier le plan actif, la classification des sessions, les événements `cell%`, les métriques IORM, la latence, le débit et la période métier. La bonne recommandation indique ce qui est prouvé, ce qui reste incertain et quelle conséquence le changement aura sur les workloads secondaires.
+Différence :
 
-| À retenir | Formulation opérationnelle |
+```text
+Database Resource Manager classe et contrôle les sessions côté base.
+IORM arbitre les ressources I/O côté Storage Cells.
+```
+
+Matrice proposée :
+
+| Workload | Priorité | Justification |
+|---|---|---|
+| PAYPROD OLTP | Haute | Application paiement critique |
+| DWHREP reporting | Moyenne ou basse en journée | Reporting consommateur mais moins critique que paiement |
+| BATCHFIN | Moyenne nuit, basse jour | Doit respecter sa fenêtre |
+| RMAN | Contrôlée | Nécessaire mais ne doit pas saturer l’OLTP |
+| PDB_TEST | Basse | Non critique |
+
+Conclusion prudente :
+
+```text
+Si les métriques confirment une concurrence I/O entre DWHREP et PAYPROD,
+un plan IORM peut être proposé pour protéger PAYPROD en journée.
+La proposition doit être testée, documentée et validée par les équipes métier,
+DBA et exploitation.
+```
+
+---
+
+## 22. À retenir
+
+```text
+À retenir
+- IORM signifie I/O Resource Management.
+- IORM agit dans les Storage Cells.
+- Il sert à prioriser les I/O en cas de concurrence.
+- Il est essentiel en consolidation Exadata.
+- Database Resource Manager agit côté base ; IORM agit côté stockage.
+- Un noisy neighbor doit être prouvé par les métriques.
+- Une politique IORM doit venir d’une matrice workload / priorité / justification.
+- IORM protège les workloads critiques, mais ne corrige pas un mauvais SQL.
+```
+
+---
+
+## 23. Références officielles
+
+| Référence | Utilisation dans le module |
 |---|---|
-| IORM agit côté storage cells | Il arbitre les demandes I/O concurrentes vers flash et disques. |
-| DBRM agit côté base | Il classe et gouverne les sessions, notamment via consumer groups. |
-| La consolidation crée le besoin | Plusieurs workloads partagent les mêmes ressources physiques. |
-| Le noisy neighbor doit être prouvé | Corréler horaires, sessions, événements `cell%`, métriques cells et impact métier. |
-| La matrice de priorité est obligatoire | Chaque workload doit avoir une priorité et une justification. |
-| Le changement doit être mesuré | Comparer avant/après et prévoir un retour arrière. |
-
-Sources recommandées pour approfondissement : la documentation Oracle Exadata sur l’administration des storage servers et d’IORM, la documentation Oracle Database Resource Manager, la documentation AWR/ASH et les guides Oracle Maximum Availability Architecture pour replacer la gouvernance I/O dans une stratégie d’exploitation complète.
+| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | IORM, Storage Cells, Exadata System Software. |
+| [Oracle Exadata System Software Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/sagug/) | CellCLI, IORM plans, métriques cells. |
+| [Oracle Database Resource Manager Documentation](https://docs.oracle.com/en/database/) | Consumer groups, plans Resource Manager, classification des sessions. |
+| [Oracle Database Performance Tuning Guide](https://docs.oracle.com/en/database/) | AWR, ASH, wait events, SQL performance. |
