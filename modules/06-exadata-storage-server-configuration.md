@@ -1,227 +1,691 @@
-    # Module 06 — Exadata Storage Server Configuration
+# Module 06 — Exadata Storage Server Configuration
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Apprendre le modèle des storage cells, objets CellCLI, disques, flash, alertes et métriques. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module explique la configuration et la lecture opérationnelle des **Exadata Storage Servers**, aussi appelés **Storage Cells**.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de comprendre que les Storage Cells ne sont pas de simples tiroirs de disques. Elles contiennent du matériel, du logiciel Exadata, des objets de stockage, de la flash, des métriques, des alertes et des fonctions d’optimisation.
 
-    Les storage cells ne sont pas de simples tiroirs disques. Elles exécutent un logiciel capable de gérer flash, disques, offload SQL, métriques et alertes. CellCLI est l’interface principale d’administration côté cell.
+À la fin de ce module, le lecteur doit être capable de :
 
-    La configuration des storage servers conditionne l’accès aux cell disks, grid disks, flash cache, métriques et alertes. Une cellule mal comprise peut produire des symptômes vus côté base alors que la cause réelle se trouve dans le stockage Exadata.
+- expliquer le rôle d’une Storage Cell ;
+- distinguer physical disk, cell disk et grid disk ;
+- comprendre comment ASM consomme les grid disks ;
+- comprendre le rôle de Flash Cache et Flash Log ;
+- lire les alertes et métriques CellCLI ;
+- comprendre l’impact d’une alerte disque ;
+- relier un symptôme base de données à une cause possible côté cell ;
+- utiliser des commandes read-only de diagnostic ;
+- éviter de confondre Storage Cell, ASM et baie SAN classique.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **Physical Disk** | Disque physique présent dans une storage cell, support matériel de capacité ou performance selon modèle. | Une alerte predictive failure concerne d’abord un physical disk. |
-| **Cell Disk** | Objet logique créé à partir d’un physical disk et utilisé pour construire des grid disks. | Un disque physique peut correspondre à un cell disk. |
-| **Grid Disk** | Portion de cell disk présentée à ASM comme disque utilisable. | ASM voit des chemins issus de grid disks DATA ou RECO. |
+## 2. Pourquoi les Storage Cells sont importantes
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **Physical Disk** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
+Dans Oracle Exadata, les Storage Cells forment la couche de stockage intelligente.
 
-    ## 4. Architecture concernée
+Elles ne font pas seulement du stockage. Elles participent aussi à :
 
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
+```text
+lecture des données
+écriture des données
+gestion des disques
+gestion de la flash
+présentation des grid disks à ASM
+Smart Scan
+Offload SQL
+Storage Index
+Flash Cache
+Flash Log
+IORM
+métriques
+alertes
+diagnostic
+```
 
-    Les diagrammes associés au chapitre sont :
+Dans une architecture classique, le stockage renvoie généralement des blocs au serveur Oracle.
 
-    - [`physical-cell-grid-asm.mmd`](../diagrams/physical-cell-grid-asm.mmd)
+Dans Exadata, la Storage Cell peut renvoyer :
 
-    ## 5. Fonctionnement détaillé
+```text
+des blocs
+ou des résultats filtrés
+ou un volume réduit de données
+```
 
-    Les storage cells ne sont pas de simples tiroirs disques. Elles exécutent un logiciel capable de gérer flash, disques, offload SQL, métriques et alertes. CellCLI est l’interface principale d’administration côté cell.
+selon le type de requête et les conditions d’éligibilité.
 
-    Le fonctionnement se lit dans CellCLI en partant de la cellule, puis des physical disks, cell disks, grid disks, flash cache et métriques. Le diagnostic compare l’état déclaré par la cellule avec l’effet observé dans ASM et dans les attentes database.
+À retenir :
 
-    Pour ce module, les notions centrales sont **Physical Disk, Cell Disk, Grid Disk**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour les storage servers, l’analyse commence par l’inventaire, l’état des disques, les alertes et les métriques de latence. Elle doit distinguer panne physique, saturation, rebalance ASM et simple pic applicatif. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
+```text
+Une Storage Cell = serveur de stockage intelligent Exadata.
+Elle contient CPU, mémoire, disques, flash, logiciel Exadata et fonctions d’optimisation.
+```
 
-    ## 6. Exemple concret
+---
 
-    Une alerte disque apparaît ; il faut comprendre la chaîne physical disk → cell disk → grid disk → ASM avant de décider.
+## 3. Vue d’ensemble d’une Storage Cell
 
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
+Une Storage Cell contient plusieurs couches :
 
-    ## 7. Commandes, vues et métriques utiles
+```text
+Storage Cell physique
+→ Physical Disks / Flash Devices
+→ Cell Disks
+→ Grid Disks
+→ ASM Disks
+→ ASM Diskgroups
+→ Fichiers Oracle
+```
 
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
-
-    ```bash
-    cellcli -e "list cell detail"
-cellcli -e "list griddisk attributes name,status,asmmodestatus,asmdeactivationoutcome"
-asmcmd lsdg
-    ```
-
-    | Élément à lire | Interprétation |
-    |---|---|
-    | Physical Disk | Cette information indique comment le mécanisme Physical Disk se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Cell Disk | Cette information indique comment le mécanisme Cell Disk se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Grid Disk | Cette information indique comment le mécanisme Grid Disk se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-
-    ## 8. Interprétation des résultats
-
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
-
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
-
-    ## 9. Erreurs fréquentes
-
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
-
-    ## 10. Bonnes pratiques
-
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
-
-    ## 11. Exercice pratique
-
-    Vous êtes responsable du sujet **Exadata Storage Server Configuration** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
-
-    > Une alerte disque apparaît ; il faut comprendre la chaîne physical disk → cell disk → grid disk → ASM avant de décider.
-
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
-
-    ## 12. Corrigé de l’exercice
-
-    Une bonne réponse commence par identifier les composants du chapitre : **Physical Disk, Cell Disk, Grid Disk**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
-
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance.  : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
-
-    ## 13. Synthèse à retenir
-
-    ```text
-    À retenir
-    - Exadata Storage Server Configuration  : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : Physical Disk, Cell Disk, Grid Disk.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
-
-
-
-
-## Rectification V5 vérifiable — contenu expert non générique
-
-Cette section constitue la correction V5 visible du module. Elle remplace l’approche répétitive par un raisonnement propre au thème **Storage Server**. L’objectif n’est pas d’ajouter une phrase de méthode, mais de montrer comment un administrateur Exadata produit une preuve technique exploitable devant une équipe production, architecture ou support.
-
-| Élément expert V5 | Application concrète au module |
-|---|---|
-| Objets à nommer explicitement | physical disk, cell disk, grid disk, flash cache, alertes CellCLI. |
-| Méthode de diagnostic | relier état cell, métriques et visibilité ASM. |
-| Cas d’école attendu | un disque predictive failure déclenche une analyse différente d’une saturation flash. |
-| Preuve minimale | Une commande ou vue read-only, une métrique datée, un composant identifié et une interprétation liée au risque métier. |
-| Limite de conclusion | Une mesure isolée ne suffit pas ; elle doit être reliée à la période, au workload, à la version Exadata et à l’objectif de service. |
-
-### Raisonnement attendu en situation réelle
-
-Pour **Storage Server**, le diagnostic commence par une hypothèse précise et réfutable. L’administrateur doit formuler ce qu’il cherche à prouver : saturation, mauvais placement, absence d’offload, contention entre workloads, défaut de redondance, fenêtre de maintenance insuffisante ou frontière de responsabilité cloud. Ensuite, il collecte uniquement des preuves read-only. Cette discipline évite deux erreurs fréquentes : modifier une plateforme stable sans preuve et confondre un symptôme visible avec la cause racine.
-
-Le livrable attendu dans un contexte professionnel est une courte note technique. Elle doit contenir le symptôme, l’heure, les objets Exadata concernés, les commandes utilisées, les résultats observés, l’interprétation et la prochaine action. Si une modification est proposée, elle doit être séparée du diagnostic et rattachée à un runbook, une validation CAB ou une procédure de support Oracle.
-
-### Exercice V5 complémentaire
-
-Rédigez une analyse opérationnelle pour le cas suivant : **un disque predictive failure déclenche une analyse différente d’une saturation flash**. Votre réponse doit citer les objets Exadata concernés, indiquer trois preuves read-only, expliquer ce qui invaliderait votre hypothèse et proposer une recommandation limitée au périmètre du module.
-
-### Corrigé V5 complémentaire
-
-Une bonne réponse identifie d’abord le composant dominant du sujet **Storage Server**, puis relie les preuves à un impact mesurable. Les trois preuves doivent couvrir au moins deux couches différentes lorsque le sujet l’exige, par exemple base et cell, cluster et réseau, ou cloud et VM cluster. La recommandation est correcte seulement si elle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans créer un risque supérieur au problème initial.
-
-## Références officielles
-
-| Référence | Utilisation dans le module |
-|---|---|
-| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
-| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Administration Exadata, Storage Server, CellCLI, maintenance et monitoring. |
-| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
-| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
-| [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
-## Complément expert V5 — Chaîne stockage cellule, disques et grid disks
-
-### Explication technique spécifique
-
-Une storage cell Exadata n’expose pas directement les disques physiques aux bases de données. Elle transforme les ressources matérielles en objets administrables : **physical disks** pour les disques réels, **flash devices** pour les cartes ou modules flash, **cell disks** comme abstraction locale créée sur ces périphériques, puis **grid disks** comme unités présentées à ASM. Cette chaîne explique pourquoi ASM ne voit pas les disques physiques : ASM consomme des grid disks publiés par les cellules, ce qui permet à Exadata System Software de gérer flash cache, métriques, alertes, offload et maintenance cellule avant que la couche ASM ne voie le stockage.[^v5-cell-admin]
-
-Un **cell disk** correspond à une portion de disque ou de flash contrôlée par la cellule. Un **grid disk** est découpé dans un cell disk et affecté à un usage logique, souvent DATA, RECO ou DBFS. Les griddisks DATA hébergent les datafiles et tempfiles via ASM ; RECO héberge souvent fast recovery area, archivelogs et backups locaux ; DBFS peut porter des usages spécifiques comme staging ou fichiers partagés selon design. Les sparse diskgroups ajoutent une capacité de provisioning optimisée pour clones ou snapshots, mais ils exigent une discipline stricte car une saturation logique peut avoir des effets rapides.
+Schéma logique :
 
 ```mermaid
-flowchart TD
-    PD[Physical Disk] --> CD[Cell Disk]
-    FD[Flash Device] --> FCD[Flash Cell Disk]
-    CD --> GD1[Grid Disk DATA]
-    CD --> GD2[Grid Disk RECO]
-    CD --> GD3[Grid Disk DBFS]
-    FCD --> FGD[Flash Grid Disk]
-    GD1 --> ASM1[ASM Disk DATA]
-    GD2 --> ASM2[ASM Disk RECO]
-    GD3 --> ASM3[ASM Disk DBFS]
-    ASM1 --> DG1[ASM Diskgroup]
-    DG1 --> FILES[Datafile, tempfile, redo, archivelog]
+flowchart LR
+    A[Storage Cell] --> B[Physical Disks]
+    A --> C[Flash Devices]
+    B --> D[Cell Disks]
+    C --> E[Flash Cache / Flash Log]
+    D --> F[Grid Disks]
+    F --> G[ASM Disks]
+    G --> H[ASM Diskgroups DATA / RECO]
+    H --> I[Datafiles / Redo / Controlfiles / FRA]
 ```
 
-### Exemple concret réaliste
+---
 
-Une cellule `cel01` contient douze disques haute capacité. Chaque disque est visible comme physical disk. Après configuration, la cellule crée des cell disks, puis des grid disks `DATA_CD_00_cel01`, `RECO_CD_00_cel01` et éventuellement `DBFS_CD_00_cel01`. ASM voit ces grid disks comme disques ASM, répartis dans des failure groups par cellule. Si un disque physique tombe en panne, la cellule marque les objets dépendants en erreur et ASM s’appuie sur la redondance du diskgroup pour maintenir l’accès aux fichiers. Si une cellule entière devient indisponible, tous les grid disks de son failure group disparaissent temporairement ; la capacité à survivre dépend du niveau de redondance ASM et de la distribution des extents.
+## 4. Composants physiques d’une Storage Cell
 
-### Comment raisonner
+| Composant | Rôle |
+|---|---|
+| CPU | Exécute Exadata System Software et certaines fonctions d’offload |
+| Mémoire | Utilisée par le système cell et les traitements internes |
+| Disques physiques | Fournissent la capacité persistante |
+| Flash devices | Fournissent accélération et faible latence |
+| Interfaces réseau | Connectent la cell au réseau interne RoCE / InfiniBand et administration |
+| Alimentation / matériel | Support physique de la disponibilité |
+| Contrôleurs / firmware | Couche matérielle de gestion des périphériques |
 
-Le diagnostic stockage Exadata suit la chaîne physique vers logique. On commence par vérifier les physical disks et flash devices, puis les cell disks, puis les grid disks, puis l’état ASM. Si ASM signale un disque absent mais que la cellule voit le disque physique en bon état, l’anomalie peut être au niveau griddisk, permissions ASM, état de présentation ou communication. Si la cellule signale un predictive failure sur un disque, ASM peut encore être online grâce au mirroring ; il ne faut pas confondre survie logique et absence de risque matériel.
+À retenir :
 
-### Commandes / vues utiles
+```text
+La cell a sa propre puissance de calcul.
+C’est cette intelligence locale qui permet Smart Scan, IORM et les métriques cell.
+```
+
+---
+
+## 5. Composants logiciels d’une Storage Cell
+
+| Logiciel / fonction | Rôle |
+|---|---|
+| Exadata System Software | Logiciel principal de la Storage Cell |
+| CellCLI | Interface d’administration et diagnostic cell |
+| MS / Management Server | Gestion et monitoring de la cell |
+| RS / Restart Server | Surveillance et redémarrage de services |
+| CELLSRV | Service principal de traitement I/O Exadata |
+| Smart Scan | Filtrage/projection possible côté cell |
+| Offload SQL | Déport partiel du traitement SQL |
+| Storage Index | Évite certaines lectures inutiles |
+| Flash Cache | Cache flash pour lectures |
+| Flash Log | Accélération de certaines écritures redo |
+| IORM | Gestion de priorité I/O |
+| Alerting | Alertes matérielles et logicielles |
+| Metrics | Mesures de performance et état |
+
+---
+
+## 6. Physical Disk
+
+### 6.1 Définition
+
+Un **Physical Disk** est un disque physique réel présent dans une Storage Cell.
+
+Il peut s’agir selon modèle :
+
+```text
+disque dur capacité
+disque haute performance
+device flash / NVMe selon génération
+```
+
+### 6.2 Rôle
+
+Le physical disk fournit le support matériel.
+
+Il est à la base de la chaîne de stockage.
+
+```text
+Physical Disk
+→ Cell Disk
+→ Grid Disk
+→ ASM Disk
+→ Diskgroup ASM
+```
+
+### 6.3 À surveiller
+
+```text
+état du disque
+erreurs matérielles
+predictive failure
+latence
+capacité
+remplacement
+rebuild / rebalance
+```
+
+### 6.4 Commandes utiles
 
 ```bash
-# Read-only : chaîne cellule complète
+cellcli -e "list physicaldisk"
 cellcli -e "list physicaldisk detail"
-cellcli -e "list flashcache detail"
+```
+
+---
+
+## 7. Cell Disk
+
+### 7.1 Définition
+
+Un **Cell Disk** est un objet logique créé dans la Storage Cell à partir d’un physical disk.
+
+Il représente la manière dont Exadata expose le disque physique à la couche suivante.
+
+### 7.2 Rôle
+
+Le cell disk sert de base pour créer des grid disks.
+
+```text
+Physical Disk → Cell Disk → Grid Disk
+```
+
+### 7.3 À retenir
+
+```text
+Le cell disk appartient à la Storage Cell.
+Il n’est pas encore directement un diskgroup ASM.
+```
+
+### 7.4 Commandes utiles
+
+```bash
+cellcli -e "list celldisk"
 cellcli -e "list celldisk detail"
+```
+
+---
+
+## 8. Grid Disk
+
+### 8.1 Définition
+
+Un **Grid Disk** est une portion de cell disk présentée à ASM.
+
+ASM voit ensuite ces grid disks comme des ASM disks.
+
+### 8.2 Rôle
+
+Le grid disk est le pont entre la Storage Cell et ASM.
+
+```text
+Cell Disk → Grid Disk → ASM Disk → Diskgroup
+```
+
+### 8.3 Exemple
+
+Une Storage Cell peut fournir des grid disks pour plusieurs usages :
+
+```text
+DATA
+RECO
+DBFS
+autres diskgroups selon design
+```
+
+### 8.4 À surveiller
+
+```text
+status
+asmmodestatus
+asmdeactivationoutcome
+taille
+appartenance à un diskgroup
+état attendu par ASM
+```
+
+### 8.5 Commandes utiles
+
+```bash
+cellcli -e "list griddisk"
 cellcli -e "list griddisk detail"
-cellcli -e "list alerthistory attributes name,alertMessage,severity,beginTime"
-
-# Read-only : vision ASM depuis Grid Infrastructure
-asmcmd lsdg
-asmcmd lsdsk -p
-asmcmd lsdsk -k
+cellcli -e "list griddisk attributes name,status,asmmodestatus,asmdeactivationoutcome,size"
 ```
 
-```sql
--- Read-only : correspondance ASM et état des disques
-select group_number, name, type, state, total_mb, free_mb from v$asm_diskgroup order by name;
-select group_number, disk_number, name, path, mount_status, header_status, mode_status, state from v$asm_disk order by group_number, disk_number;
+---
+
+## 9. Relation avec ASM
+
+ASM consomme les grid disks fournis par les Storage Cells.
+
+Chaîne complète :
+
+```text
+Physical Disk
+→ Cell Disk
+→ Grid Disk
+→ ASM Disk
+→ ASM Diskgroup DATA / RECO
+→ Fichiers Oracle
 ```
 
-### Comment interpréter
+Exemple :
 
-`list physicaldisk detail` répond à la question matérielle : le disque ou la flash existe-t-il et dans quel état matériel se trouve-t-il ? `list celldisk detail` répond à la question d’abstraction locale : la cellule a-t-elle correctement créé et exposé sa couche interne ? `list griddisk detail` répond à la question de présentation à ASM : les objets logiques sont-ils actifs, synchrones et associés au bon usage ? `asmcmd lsdg` répond à la question base : les diskgroups disposent-ils de capacité et de redondance suffisantes ? Une divergence entre ces niveaux est souvent le point de départ du diagnostic.
+```text
+DATA = fichiers de données principaux
+RECO = recovery area, archivelogs, flashback logs selon design
+```
 
-### Exercice pratique
+ASM gère :
 
-On observe qu’un diskgroup ASM DATA reste monté, mais `cellcli` signale un disque physique en predictive failure sur une cellule. Explique pourquoi la base peut continuer à fonctionner et quelles vérifications read-only effectuer avant toute action corrective.
+```text
+redondance
+failure groups
+répartition des extents
+rebalance
+capacité utilisable
+état des disques ASM
+```
 
-### Corrigé détaillé
+Une alerte dans une Storage Cell peut donc avoir un impact visible dans ASM.
 
-La base peut continuer à fonctionner parce qu’ASM ne dépend pas d’un seul disque physique ; il s’appuie sur des extents répartis et miroités entre failure groups. Si le diskgroup est en normal redundancy ou high redundancy, la perte d’un disque peut être absorbée tant que les copies nécessaires restent accessibles sur d’autres failure groups. Il faut vérifier l’état du physical disk, le statut des cell disks et grid disks associés, l’état ASM des disques, la capacité libre et l’existence d’alertes. Les commandes read-only pertinentes sont `cellcli -e "list physicaldisk detail"`, `cellcli -e "list celldisk detail"`, `cellcli -e "list griddisk detail"`, `asmcmd lsdg` et une requête sur `v$asm_disk`. Le corrigé est correct parce qu’il sépare le symptôme matériel de la disponibilité logique assurée par ASM.
+---
 
-### Limites et pièges
+## 10. Flash Cache
 
-Ne jamais interpréter `free_mb` ASM comme capacité immédiatement utilisable sans tenir compte de la redondance, du rebalance et du niveau de failure group. Ne pas confondre un disque ASM visible avec un disque physique sain. Ne pas exécuter de commandes de drop, recreate ou alter diskgroup dans un support pédagogique sans procédure Oracle validée. La V5 conserve donc uniquement des commandes de lecture.
+### 10.1 Définition
+
+Flash Cache est une couche flash située dans les Storage Cells.
+
+Elle sert à accélérer certaines lectures.
+
+### 10.2 Rôle
+
+Flash Cache peut améliorer :
+
+```text
+lectures fréquentes
+blocs chauds
+workloads OLTP
+charges mixtes
+latence de lecture
+```
+
+### 10.3 Différence avec Smart Scan
+
+| Sujet | Flash Cache | Smart Scan |
+|---|---|---|
+| But | Lire plus vite | Renvoyer moins de données |
+| Où ? | Storage Cells | Storage Cells |
+| Usage typique | Blocs chauds | Grands scans éligibles |
+| Gain | Latence / débit | Réduction de volume transféré |
+
+---
+
+## 11. Flash Log
+
+### 11.1 Définition
+
+Flash Log utilise la flash des Storage Cells pour aider certaines écritures redo.
+
+### 11.2 Rôle
+
+Il peut réduire la latence liée aux écritures redo dans certains scénarios.
+
+À surveiller côté base :
+
+```text
+log file sync
+log file parallel write
+temps de commit
+activité redo
+```
+
+À surveiller côté cell :
+
+```text
+état flash
+métriques flash
+alertes flash
+```
+
+---
+
+## 12. Alertes Storage Cell
+
+Les Storage Cells produisent des alertes.
+
+Exemples :
+
+```text
+disque en predictive failure
+flash device en erreur
+problème de température
+problème réseau
+problème de service cell
+problème de capacité
+griddisk offline
+cell disk dégradé
+```
+
+### Commandes utiles
+
+```bash
+cellcli -e "list alert history"
+cellcli -e "list alerthistory"
+cellcli -e "list cell detail"
+```
+
+Selon version, la syntaxe peut varier légèrement.
+
+### Méthode
+
+```text
+1. Lire l’alerte.
+2. Identifier le composant.
+3. Relier physical disk / cell disk / grid disk / ASM.
+4. Vérifier l’impact côté ASM.
+5. Vérifier l’impact côté database.
+6. Ne pas conclure uniquement sur l’alerte brute.
+```
+
+---
+
+## 13. Métriques Storage Cell
+
+Les métriques cells sont essentielles pour diagnostiquer les I/O.
+
+Exemples de familles de métriques :
+
+```text
+I/O disque
+I/O flash
+latence
+débit
+utilisation
+erreurs
+IORM
+offload
+Smart Scan
+réseau interne
+```
+
+### Commandes utiles
+
+```bash
+cellcli -e "list metriccurrent"
+cellcli -e "list metriccurrent where objectType = 'CELL'"
+cellcli -e "list metriccurrent attributes name,metricValue,metricObjectName"
+```
 
 ### À retenir
 
-La chaîne stockage Exadata est : physical disk ou flash device, cell disk, grid disk, ASM disk, ASM diskgroup, puis fichiers Oracle. Le diagnostic expert consiste à localiser précisément le niveau où l’état diverge.
+```text
+Une métrique cell doit être interprétée avec le contexte :
+heure, workload, base concernée, SQL concerné, état ASM, état réseau.
+```
 
-[^v5-cell-admin]: Oracle, *Oracle Exadata System Software User's Guide — CellCLI and Storage Server Administration*, https://docs.oracle.com/en/engineered-systems/exadata-database-machine/sagug/
+---
+
+## 14. Diagnostic d’une alerte disque
+
+### Situation
+
+Une alerte indique un problème sur un disque physique.
+
+### Chaîne à reconstituer
+
+```text
+Physical Disk en alerte
+→ Cell Disk associé
+→ Grid Disk associé
+→ ASM Disk correspondant
+→ Diskgroup impacté
+→ Fichiers Oracle potentiellement concernés
+```
+
+### Commandes possibles
+
+```bash
+cellcli -e "list physicaldisk detail"
+cellcli -e "list celldisk detail"
+cellcli -e "list griddisk attributes name,status,asmmodestatus,asmdeactivationoutcome"
+asmcmd lsdg
+asmcmd lsdsk -p
+```
+
+### Question à se poser
+
+```text
+Le diskgroup ASM conserve-t-il sa redondance ?
+Un rebalance est-il en cours ?
+Une base est-elle impactée ?
+La performance I/O est-elle dégradée ?
+```
+
+---
+
+## 15. Diagnostic d’une lenteur I/O
+
+Une lenteur I/O vue côté base peut venir :
+
+```text
+du SQL
+du plan d’exécution
+de Smart Scan absent
+d’une Storage Cell saturée
+d’un disque ou flash en erreur
+d’un rebalance ASM
+d’un problème réseau interne
+d’un workload concurrent
+d’une politique IORM
+```
+
+Méthode :
+
+```text
+1. Identifier SQL_ID ou workload.
+2. Lire AWR / ASH / wait events.
+3. Vérifier les événements cell.
+4. Vérifier ASM.
+5. Vérifier CellCLI.
+6. Vérifier alertes et métriques cell.
+7. Croiser les couches avant conclusion.
+```
+
+---
+
+## 16. Commandes read-only utiles
+
+### 16.1 Inventaire cell
+
+```bash
+cellcli -e "list cell"
+cellcli -e "list cell detail"
+```
+
+### 16.2 Physical disks
+
+```bash
+cellcli -e "list physicaldisk"
+cellcli -e "list physicaldisk detail"
+```
+
+### 16.3 Cell disks
+
+```bash
+cellcli -e "list celldisk"
+cellcli -e "list celldisk detail"
+```
+
+### 16.4 Grid disks
+
+```bash
+cellcli -e "list griddisk"
+cellcli -e "list griddisk detail"
+cellcli -e "list griddisk attributes name,status,asmmodestatus,asmdeactivationoutcome,size"
+```
+
+### 16.5 Flash
+
+```bash
+cellcli -e "list flashcache"
+cellcli -e "list flashcache detail"
+```
+
+### 16.6 Alertes
+
+```bash
+cellcli -e "list alert history"
+cellcli -e "list alerthistory"
+```
+
+### 16.7 Métriques
+
+```bash
+cellcli -e "list metriccurrent"
+cellcli -e "list metriccurrent attributes name,metricValue,metricObjectName"
+```
+
+### 16.8 ASM côté Database Server
+
+```bash
+asmcmd lsdg
+asmcmd lsdsk -p
+```
+
+```sql
+select name, total_mb, free_mb, type, state
+from v$asm_diskgroup
+order by name;
+```
+
+---
+
+## 17. Erreurs fréquentes
+
+| Erreur | Pourquoi c’est dangereux | Correction |
+|---|---|---|
+| Voir la cell comme une baie SAN | On ignore Smart Scan, flash, IORM et métriques | Lire CellCLI et comprendre la chaîne Exadata |
+| Confondre physical disk et grid disk | Mauvais diagnostic d’impact | Reconstituer physical → cell → grid → ASM |
+| Conclure sur une alerte seule | L’impact réel peut être différent | Vérifier ASM, DB, métriques et redondance |
+| Ignorer ASM | Les grid disks sont consommés par ASM | Lire `asmcmd lsdg` et `asmcmd lsdsk -p` |
+| Ignorer le réseau interne | Une lenteur cell peut être liée au fabric | Croiser wait events, CellCLI et réseau |
+| Modifier sans runbook | Risque de perte de service | Diagnostic read-only puis procédure validée |
+| Confondre Flash Cache et Flash Log | Diagnostic erroné lecture/écriture | Séparer lecture et redo |
+
+---
+
+## 18. Exercice pratique
+
+Une alerte apparaît sur une Storage Cell :
+
+```text
+Un physical disk est signalé en predictive failure.
+```
+
+Répondez aux questions :
+
+1. Quel est le premier composant concerné ?
+2. Quelle chaîne devez-vous reconstituer ?
+3. Quels objets CellCLI devez-vous lire ?
+4. Que faut-il vérifier côté ASM ?
+5. Quels risques existent pour DATA ou RECO ?
+6. Quelle conclusion prudente formuler ?
+7. Quelle action ne faut-il pas faire sans runbook ?
+
+---
+
+## 19. Corrigé indicatif
+
+Le premier composant concerné est le physical disk.
+
+La chaîne à reconstituer est :
+
+```text
+Physical Disk
+→ Cell Disk
+→ Grid Disk
+→ ASM Disk
+→ Diskgroup DATA ou RECO
+→ Fichiers Oracle
+```
+
+Objets CellCLI à lire :
+
+```text
+physicaldisk
+celldisk
+griddisk
+alert history
+metriccurrent
+cell detail
+```
+
+Côté ASM, il faut vérifier :
+
+```text
+état du diskgroup
+capacité libre
+redondance
+failure groups
+rebalance éventuel
+disques offline
+```
+
+Commandes possibles :
+
+```bash
+cellcli -e "list physicaldisk detail"
+cellcli -e "list celldisk detail"
+cellcli -e "list griddisk attributes name,status,asmmodestatus,asmdeactivationoutcome"
+asmcmd lsdg
+asmcmd lsdsk -p
+```
+
+Conclusion prudente :
+
+```text
+L’alerte indique un risque matériel sur une cell.
+On ne conclut pas à une perte de données sans vérifier ASM, la redondance,
+les grid disks associés et l’état des bases.
+Toute action de remplacement ou de désactivation doit suivre la procédure Oracle ou interne.
+```
+
+---
+
+## 20. À retenir
+
+```text
+À retenir
+- Une Storage Cell est un serveur de stockage intelligent.
+- Elle contient CPU, mémoire, disques, flash et Exadata System Software.
+- La chaîne clé est physical disk → cell disk → grid disk → ASM disk → diskgroup.
+- ASM consomme les grid disks fournis par les cells.
+- Flash Cache accélère certaines lectures.
+- Flash Log aide certaines écritures redo.
+- CellCLI est l’outil principal de lecture côté cell.
+- Une alerte cell doit toujours être reliée à ASM et à l’impact database.
+- Ne jamais modifier une cell sans procédure validée.
+```
+
+---
+
+## 21. Références officielles
+
+| Référence | Utilisation dans le module |
+|---|---|
+| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Storage Cells, CellCLI, administration et monitoring. |
+| [Oracle Exadata System Software Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/sagug/) | Cell disks, grid disks, flash, metrics, alerts. |
+| [Oracle ASM Documentation](https://docs.oracle.com/en/database/) | Diskgroups, ASM disks, redondance, rebalance. |
+| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, performance, wait events, AWR/ASH. |
