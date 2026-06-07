@@ -1,215 +1,413 @@
-    # Module 23 — HA/DR et MAA
+# Module 23 — HA/DR et MAA
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Comprendre RAC, Data Guard, Broker, switchover, failover, lag et principes MAA. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module explique les principes de **haute disponibilité**, **disaster recovery** et **Maximum Availability Architecture** sur Oracle Exadata.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de distinguer clairement les rôles de RAC, ASM, Data Guard, Broker, RMAN, sauvegarde, switchover, failover, services applicatifs et procédures de reprise.
 
-    RAC et Data Guard répondent à des risques différents. RAC traite des pannes locales ; Data Guard protège contre perte de site ou corruption logique selon stratégie.
+À la fin de ce module, le lecteur doit être capable de :
 
-    HA/DR sur Exadata combine disponibilité locale, continuité RAC, Data Guard, sauvegarde et procédures de bascule. Le sujet est critique parce qu’une architecture redondante non testée peut rester indisponible en incident réel.
+- distinguer HA locale et DR ;
+- expliquer le rôle de RAC ;
+- expliquer le rôle de Data Guard ;
+- comprendre switchover et failover ;
+- lire transport lag et apply lag ;
+- comprendre les principes MAA ;
+- valider les services après bascule ;
+- éviter de croire qu’une architecture redondante est automatiquement disponible ;
+- préparer une analyse go/no-go avant bascule.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **RAC HA locale** | Disponibilité locale par plusieurs instances sur un cluster accédant à la même base. | La perte d’un DB server peut laisser la base disponible sur un autre. |
-| **Data Guard** | Réplication Oracle vers une base standby pour continuité de site ou disaster recovery. | Une standby reçoit les redo du primaire. |
-| **Switchover** | Bascule contrôlée et réversible des rôles primaire/standby. | On switche pendant une maintenance planifiée du site primaire. |
+## 2. HA, DR et MAA
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **RAC HA locale** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
-
-    ## 4. Architecture concernée
-
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
-
-    Les diagrammes associés au chapitre sont :
-
-    - [`backup-recovery-dataguard.mmd`](../diagrams/backup-recovery-dataguard.mmd)
-
-    ## 5. Fonctionnement détaillé
-
-    RAC et Data Guard répondent à des risques différents. RAC traite des pannes locales ; Data Guard protège contre perte de site ou corruption logique selon stratégie.
-
-    Le fonctionnement se lit par domaines : instance, service, cluster resource, listener, Data Guard, redo transport, apply lag et procédures de failover. Chaque domaine apporte une preuve différente de continuité.
-
-    Pour ce module, les notions centrales sont **RAC HA locale, Data Guard, Switchover**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour HA/DR, l’analyse commence par le scénario d’incident : panne instance, panne serveur, panne cellule, corruption logique ou perte de site. Le diagnostic change selon le scénario. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
-
-    ## 6. Exemple concret
-
-    Un standby accumule du lag alors qu’une fenêtre de maintenance approche.
-
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
-
-    ## 7. Commandes, vues et métriques utiles
-
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
-
-    ```bash
-    select database_role,open_mode,protection_mode,switchover_status from v$database;
-select name,value,time_computed from v$dataguard_stats;
-dgmgrl / "show configuration"
-    ```
-
-    | Élément à lire | Interprétation |
-    |---|---|
-    | RAC HA locale | Cette information indique comment le mécanisme RAC HA locale se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Data Guard | Cette information indique comment le mécanisme Data Guard se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Switchover | Cette information indique comment le mécanisme Switchover se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| transport lag | Retard d’envoi des redo vers la standby. |
-| apply lag | Retard d’application des redo sur la standby ; il influence le RPO réel. |
-
-    ## 8. Interprétation des résultats
-
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
-
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
-
-    ## 9. Erreurs fréquentes
-
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
-
-    ## 10. Bonnes pratiques
-
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
-
-    ## 11. Exercice pratique
-
-    Vous êtes responsable du sujet **HA/DR et MAA** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
-
-    > Un standby accumule du lag alors qu’une fenêtre de maintenance approche.
-
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
-
-    ## 12. Corrigé de l’exercice
-
-    Une bonne réponse commence par identifier les composants du chapitre : **RAC HA locale, Data Guard, Switchover**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
-
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance.  : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
-
-    ## 13. Synthèse à retenir
-
-    ```text
-    À retenir
-    - HA/DR et MAA  : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : RAC HA locale, Data Guard, Switchover.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
-
-
-
-
-## Rectification V5 vérifiable — contenu expert non générique
-
-Cette section constitue la correction V5 visible du module. Elle remplace l’approche répétitive par un raisonnement propre au thème **HA/DR et MAA**. L’objectif n’est pas d’ajouter une phrase de méthode, mais de montrer comment un administrateur Exadata produit une preuve technique exploitable devant une équipe production, architecture ou support.
-
-| Élément expert V5 | Application concrète au module |
+| Terme | Sens |
 |---|---|
-| Objets à nommer explicitement | RAC, services, Data Guard, role transition, apply lag, FSFO. |
-| Méthode de diagnostic | associer scénario d’incident et mécanisme de continuité. |
-| Cas d’école attendu | une bascule Data Guard réussie doit aussi valider services et connexions applicatives. |
-| Preuve minimale | Une commande ou vue read-only, une métrique datée, un composant identifié et une interprétation liée au risque métier. |
-| Limite de conclusion | Une mesure isolée ne suffit pas ; elle doit être reliée à la période, au workload, à la version Exadata et à l’objectif de service. |
+| HA | Haute disponibilité locale |
+| DR | Reprise après sinistre |
+| MAA | Architecture Oracle de disponibilité maximale |
+| RAC | Plusieurs instances pour une base locale |
+| Data Guard | Base standby pour continuité de site |
+| RMAN | Sauvegarde/restauration |
+| Flashback | Retour logique selon configuration |
+| Services | Continuité applicative et routage |
 
-### Raisonnement attendu en situation réelle
+À retenir :
 
-Pour **HA/DR et MAA**, le diagnostic commence par une hypothèse précise et réfutable. L’administrateur doit formuler ce qu’il cherche à prouver : saturation, mauvais placement, absence d’offload, contention entre workloads, défaut de redondance, fenêtre de maintenance insuffisante ou frontière de responsabilité cloud. Ensuite, il collecte uniquement des preuves read-only. Cette discipline évite deux erreurs fréquentes : modifier une plateforme stable sans preuve et confondre un symptôme visible avec la cause racine.
-
-Le livrable attendu dans un contexte professionnel est une courte note technique. Elle doit contenir le symptôme, l’heure, les objets Exadata concernés, les commandes utilisées, les résultats observés, l’interprétation et la prochaine action. Si une modification est proposée, elle doit être séparée du diagnostic et rattachée à un runbook, une validation CAB ou une procédure de support Oracle.
-
-### Exercice V5 complémentaire
-
-Rédigez une analyse opérationnelle pour le cas suivant : **une bascule Data Guard réussie doit aussi valider services et connexions applicatives**. Votre réponse doit citer les objets Exadata concernés, indiquer trois preuves read-only, expliquer ce qui invaliderait votre hypothèse et proposer une recommandation limitée au périmètre du module.
-
-### Corrigé V5 complémentaire
-
-Une bonne réponse identifie d’abord le composant dominant du sujet **HA/DR et MAA**, puis relie les preuves à un impact mesurable. Les trois preuves doivent couvrir au moins deux couches différentes lorsque le sujet l’exige, par exemple base et cell, cluster et réseau, ou cloud et VM cluster. La recommandation est correcte seulement si elle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans créer un risque supérieur au problème initial.
-
-## Références officielles
-
-| Référence | Utilisation dans le module |
-|---|---|
-| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
-| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Administration Exadata, Storage Server, CellCLI, maintenance et monitoring. |
-| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
-| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
-| [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
-## Complément expert V5 — HA/DR, RAC, ASM, Data Guard et MAA
-
-### Explication technique spécifique
-
-La haute disponibilité Exadata combine plusieurs couches : redondance matérielle, ASM failure groups, Oracle RAC, services applicatifs, Data Guard, backups RMAN, flashback et procédures MAA. RAC protège contre la perte d’une instance ou d’un database server, ASM protège contre la perte de disques ou cellules selon redondance, Data Guard protège contre la perte de site ou corruption logique propagée selon configuration. MAA assemble ces capacités en architectures de référence et en pratiques testables.[^v5-maa]
-
-```mermaid
-flowchart LR
-    APP[Applications] --> SVC[Services RAC]
-    SVC --> RAC[RAC primary]
-    RAC --> ASM[ASM DATA/RECO]
-    ASM --> CELL[Storage cells]
-    RAC --> DG[Data Guard redo transport]
-    DG --> STBY[Standby site]
-    RAC --> RMAN[Backups RMAN]
+```text
+RAC ne remplace pas Data Guard.
+Data Guard ne remplace pas RMAN.
+RMAN ne remplace pas un plan de continuité.
 ```
 
-### Exemple concret réaliste
+---
 
-La perte d’un database server provoque une reconnexion des services vers les instances restantes ; la perte d’un disque est absorbée par ASM ; la perte d’un site impose Data Guard ou restauration. Ces incidents n’ont pas le même RTO. Un support expert doit donc apprendre à associer chaque panne à la couche qui la couvre et au test qui prouve cette couverture.
+## 3. RAC — disponibilité locale
 
-### Comment raisonner
+RAC permet à plusieurs instances d’accéder à la même base.
 
-Commence par nommer le scénario : panne instance, panne serveur, panne cellule, corruption, perte site, erreur humaine. Associe ensuite la protection : RAC, ASM, Data Guard, Flashback, RMAN. Enfin, vérifie les preuves : état services, lag Data Guard, état diskgroups, backups valides, tests de switchover ou restore.
+Protège contre :
 
-### Commandes / vues utiles
+```text
+perte d’une instance
+perte d’un DB server
+maintenance locale selon design
+bascule de service
+```
+
+Ne protège pas contre :
+
+```text
+perte complète du site
+corruption logique propagée
+erreur humaine
+suppression métier
+perte globale du stockage
+```
+
+Commandes :
+
+```bash
+crsctl stat res -t
+srvctl status database -d <db_unique_name> -v
+srvctl status service -d <db_unique_name>
+```
+
+---
+
+## 4. Data Guard — reprise de site
+
+Data Guard maintient une base standby.
+
+Protège contre :
+
+```text
+perte site primaire
+maintenance planifiée via switchover
+certains scénarios de corruption selon stratégie
+continuité DR
+```
+
+Composants :
+
+```text
+primary database
+standby database
+redo transport
+redo apply
+Data Guard Broker
+services de bascule
+monitoring lag
+```
+
+Commandes :
 
 ```sql
-select inst_id, instance_name, status from gv$instance order by inst_id;
-select name, open_mode, database_role, switchover_status from v$database;
-select name, value, unit from v$dataguard_stats;
-select process, status, thread#, sequence# from v$managed_standby;
+select database_role, open_mode, protection_mode, switchover_status
+from v$database;
+
+select name, value, unit
+from v$dataguard_stats;
 ```
 
 ```bash
-srvctl status database -d <DB_UNIQUE_NAME>
+dgmgrl / "show configuration"
+```
+
+---
+
+## 5. Switchover
+
+Un switchover est une bascule contrôlée et réversible.
+
+Usage :
+
+```text
+maintenance planifiée
+test DR
+migration contrôlée
+bascule datacenter préparée
+```
+
+Conditions :
+
+```text
+standby synchronisée
+lag acceptable
+services prêts
+applications informées
+rollback ou retour prévu
+tests réalisés
+```
+
+À retenir :
+
+```text
+Un switchover réussi techniquement doit aussi valider les connexions applicatives.
+```
+
+---
+
+## 6. Failover
+
+Un failover est une bascule en situation d’incident.
+
+Usage :
+
+```text
+perte site primaire
+primaire inaccessible
+incident majeur
+```
+
+Risques :
+
+```text
+perte de données selon protection mode
+retour arrière plus complexe
+réintégration primaire à prévoir
+décision métier obligatoire
+```
+
+À retenir :
+
+```text
+Le failover est une décision de crise, pas une commande technique isolée.
+```
+
+---
+
+## 7. Transport lag et Apply lag
+
+| Lag | Signification |
+|---|---|
+| Transport lag | Retard d’envoi des redo vers la standby |
+| Apply lag | Retard d’application des redo sur la standby |
+
+Vue :
+
+```sql
+select name, value, unit, time_computed
+from v$dataguard_stats;
+```
+
+Interprétation :
+
+```text
+transport lag élevé → réseau/transport redo suspect
+apply lag élevé → standby/apply/I/O/charge suspect
+```
+
+---
+
+## 8. Services applicatifs
+
+Après une bascule, il faut vérifier :
+
+```text
+services RAC
+listeners
+SCAN
+DNS
+connexions applicatives
+wallets
+chaînes JDBC
+load balancer
+jobs
+batchs
+monitoring
+```
+
+Commandes :
+
+```bash
+srvctl status service -d <db_unique_name>
+srvctl config service -d <db_unique_name>
+```
+
+SQL :
+
+```sql
+select inst_id, name, network_name
+from gv$services
+order by inst_id, name;
+```
+
+---
+
+## 9. MAA — logique d’ensemble
+
+MAA combine plusieurs couches :
+
+```text
+RAC pour HA locale
+ASM pour stockage redondé
+Data Guard pour DR
+RMAN pour backup/recovery
+Flashback selon besoin
+services pour continuité applicative
+monitoring pour preuve
+runbooks pour procédures
+tests réguliers
+```
+
+Schéma :
+
+```mermaid
+flowchart LR
+    APP[Applications] --> RAC1[RAC primaire Exadata]
+    RAC1 --> DG[Redo Transport]
+    DG --> RAC2[RAC standby Exadata]
+    RAC1 --> RMAN[RMAN / Backup]
+    RAC2 --> RMAN
+    MON[Monitoring] --> RAC1
+    MON --> RAC2
+```
+
+---
+
+## 10. Scénarios d’incident
+
+| Scénario | Mécanisme |
+|---|---|
+| Instance crash | RAC |
+| DB server perdu | RAC + services |
+| Storage cell dégradée | ASM + Exadata redundancy |
+| Site perdu | Data Guard failover |
+| Maintenance site | Data Guard switchover |
+| Erreur logique | RMAN / Flashback / restore |
+| Corruption | RMAN / Data Guard selon type |
+| Lenteur standby | Analyse lag |
+
+---
+
+## 11. Go / No-Go avant bascule
+
+Critères possibles :
+
+```text
+lag acceptable
+standby ouverte selon rôle attendu
+Broker configuration OK
+services prêts
+backup récent
+applications prévenues
+tests de connexion réalisés
+plan rollback connu
+monitoring prêt
+validation métier prévue
+```
+
+Commandes :
+
+```bash
+dgmgrl / "show configuration"
+crsctl stat res -t
+srvctl status service -d <db_unique_name>
+```
+
+```sql
+select database_role, open_mode, switchover_status from v$database;
+select name, value, unit from v$dataguard_stats;
+```
+
+---
+
+## 12. Erreurs fréquentes
+
+| Erreur | Pourquoi c’est dangereux | Correction |
+|---|---|---|
+| RAC = DR | Faux sentiment de sécurité | Ajouter Data Guard |
+| Data Guard = backup | Erreur logique propagée | Garder RMAN |
+| Bascule sans services | Application KO | Valider services |
+| Ignorer lag | RPO non tenu | Lire transport/apply lag |
+| Ne pas tester | Procédure théorique | Exercices réguliers |
+| Oublier DNS/app | Bascule DB OK mais métier KO | Validation bout en bout |
+| Failover sans décision | Risque perte données | Processus de crise |
+
+---
+
+## 13. Commandes read-only utiles
+
+```sql
+select database_role, open_mode, protection_mode, switchover_status
+from v$database;
+
+select name, value, unit, time_computed
+from v$dataguard_stats;
+```
+
+```bash
+dgmgrl / "show configuration"
+crsctl stat res -t
+srvctl status database -d <db_unique_name> -v
+srvctl status service -d <db_unique_name>
 asmcmd lsdg
 ```
 
-### Comment interpréter
+---
 
-Une base RAC ouverte ne prouve pas que le DR est prêt. Il faut vérifier le transport redo, l’application sur standby, le lag, les services, les backups et les procédures. Un `SUCCESS` ponctuel ne remplace pas un test de bascule documenté.
+## 14. Exercice pratique
 
-### Exercice pratique
+Un standby accumule du lag alors qu’une fenêtre de maintenance approche.
 
-Classe les protections nécessaires pour trois incidents : perte d’un disque, perte d’un database server et perte complète du site primaire.
+Répondez :
 
-### Corrigé détaillé
+1. Différence entre transport lag et apply lag ?
+2. Quelles vues utilisez-vous ?
+3. Quels risques pour RPO/RTO ?
+4. Pourquoi ne pas lancer le switchover immédiatement ?
+5. Quelles validations avant Go ?
+6. Quelle recommandation ?
 
-La perte d’un disque relève d’ASM et de la redondance cellule. La perte d’un database server relève de RAC, Clusterware et services. La perte du site primaire relève de Data Guard, éventuellement Far Sync, backups et runbook DR. La réponse est correcte car elle ne mélange pas HA locale et DR inter-site.
+---
 
-### Limites et pièges
+## 15. Corrigé indicatif
 
-Ne pas promettre un RTO sans test. Ne pas croire que RAC remplace Data Guard. Ne pas supposer qu’un standby est utilisable sans vérifier lag, services, paramètres et capacité.
+Transport lag indique un retard d’envoi des redo. Apply lag indique un retard d’application sur standby.
 
-### À retenir
+Commandes :
 
-MAA n’est pas un slogan : c’est l’alignement mesurable entre scénario de panne, mécanisme de protection et preuve de reprise.
+```sql
+select name, value, unit from v$dataguard_stats;
+select database_role, open_mode, switchover_status from v$database;
+```
 
-[^v5-maa]: Oracle, *Oracle Maximum Availability Architecture*, https://www.oracle.com/database/technologies/high-availability/maa.html
+```bash
+dgmgrl / "show configuration"
+```
+
+Conclusion :
+
+```text
+Le switchover doit attendre que le lag soit compris et acceptable.
+La décision go/no-go dépend du RPO/RTO, de la santé Broker, des services
+et de la validation applicative.
+```
+
+---
+
+## 16. À retenir
+
+```text
+À retenir
+- RAC protège localement, pas contre perte de site.
+- Data Guard protège contre perte de site, mais ne remplace pas RMAN.
+- Switchover est planifié ; failover est une décision de crise.
+- Transport lag et apply lag doivent être distingués.
+- Les services applicatifs sont essentiels après bascule.
+- MAA combine RAC, ASM, Data Guard, RMAN, monitoring et procédures.
+- Une architecture non testée reste un risque.
+```
+
+---
+
+## 17. Références officielles
+
+| Référence | Utilisation dans le module |
+|---|---|
+| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes MAA. |
+| [Oracle Data Guard Documentation](https://docs.oracle.com/en/database/) | Data Guard, Broker, switchover, failover. |
+| [Oracle RAC Documentation](https://docs.oracle.com/en/database/) | HA locale, services RAC. |
+| [Oracle Backup and Recovery Documentation](https://docs.oracle.com/en/database/) | RMAN et récupération. |

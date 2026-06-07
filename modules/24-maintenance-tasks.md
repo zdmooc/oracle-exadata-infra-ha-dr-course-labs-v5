@@ -1,126 +1,468 @@
-    # Module 24 — Maintenance Tasks
+# Module 24 — Maintenance Tasks
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Organiser les tâches régulières : capacité, santé, comptes, certificats, journaux, versions et documentation. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module explique les **tâches de maintenance régulières** sur Oracle Exadata.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de distinguer maintenance, monitoring et patching. La maintenance régulière maintient la plateforme lisible, saine, documentée et prévisible. Elle permet de détecter les dérives avant qu’elles deviennent des incidents.
 
-    La maintenance n’est pas du patching ; elle maintient la plateforme lisible, saine et prévisible. Les petites dérives deviennent des incidents si elles ne sont jamais revues.
+À la fin de ce module, le lecteur doit être capable de :
 
-    Le sujet **24 Maintenance Tasks** doit être traité comme un mécanisme Exadata précis : l’objectif est d’identifier les composants concernés, les métriques qui prouvent le comportement et les limites qui empêchent une conclusion hâtive.
+- organiser une revue de capacité ;
+- surveiller DATA, RECO, FRA et croissance ;
+- suivre versions, agents, certificats, comptes et accès ;
+- vérifier les journaux et collectes ;
+- produire un tableau de maintenance mensuelle ;
+- préparer les preuves avant CAB ou patching ;
+- éviter les dérives silencieuses.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **Revue capacité** | Analyse régulière de l’espace ASM, FRA, croissance données et marges. | DATA augmente de 8 % par mois et impose une décision avant saturation. |
-| **Revue certificats** | Contrôle des certificats utilisés par interfaces, agents ou services selon environnement. | Un certificat expiré peut interrompre une intégration monitoring. |
-| **Journalisation diagnostic** | Ensemble de logs Oracle, GI, cell et OS nécessaires à l’analyse. | Des logs non maîtrisés peuvent saturer un filesystem. |
+## 2. Maintenance ≠ Patching
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **Revue capacité** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
-
-    ## 4. Architecture concernée
-
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
-
-    Les diagrammes associés au chapitre sont :
-
-    - [`monitoring-stack.mmd`](../diagrams/monitoring-stack.mmd)
-
-    ## 5. Fonctionnement détaillé
-
-    La maintenance n’est pas du patching ; elle maintient la plateforme lisible, saine et prévisible. Les petites dérives deviennent des incidents si elles ne sont jamais revues.
-
-    Le fonctionnement de **24 Maintenance Tasks** se lit en reliant la base Oracle, Grid Infrastructure, ASM, les storage cells, le réseau privé et les outils de support uniquement lorsque ces couches interviennent réellement dans le scénario étudié.
-
-    Pour ce module, les notions centrales sont **Revue capacité, Revue certificats, Journalisation diagnostic**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour **24 Maintenance Tasks**, l’analyse commence par une hypothèse technique testable, puis par des preuves read-only qui confirment ou écartent cette hypothèse. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
-
-    ## 6. Exemple concret
-
-    La revue mensuelle détecte une croissance FRA anormale et un agent monitoring en retard de version.
-
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
-
-    ## 7. Commandes, vues et métriques utiles
-
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
-
-    ```bash
-    crsctl stat res -t
-srvctl status database -d <db_unique_name> -v
-select instance_name,status,host_name from gv$instance;
-    ```
-
-    | Élément à lire | Interprétation |
-    |---|---|
-    | Revue capacité | Cette information indique comment le mécanisme Revue capacité se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Revue certificats | Cette information indique comment le mécanisme Revue certificats se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Journalisation diagnostic | Cette information indique comment le mécanisme Journalisation diagnostic se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-
-    ## 8. Interprétation des résultats
-
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
-
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
-
-    ## 9. Erreurs fréquentes
-
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
-
-    ## 10. Bonnes pratiques
-
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
-
-    ## 11. Exercice pratique
-
-    Vous êtes responsable du sujet **Maintenance Tasks** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
-
-    > La revue mensuelle détecte une croissance FRA anormale et un agent monitoring en retard de version.
-
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
-
-    ## 12. Corrigé de l’exercice
-
-    Une bonne réponse commence par identifier les composants du chapitre : **Revue capacité, Revue certificats, Journalisation diagnostic**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
-
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance. La recommandation finale doit rester proportionnée : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
-
-    ## 13. Synthèse à retenir
-
-    ```text
-    À retenir
-    - Maintenance Tasks fait partie d’un ensemble Exadata intégré : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : Revue capacité, Revue certificats, Journalisation diagnostic.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
-
-
-## Références officielles
-
-| Référence | Utilisation dans le module |
+| Sujet | Objectif |
 |---|---|
-| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
-| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Administration Exadata, Storage Server, CellCLI, maintenance et monitoring. |
-| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
-| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
-| [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
+| Monitoring | Détecter et diagnostiquer |
+| Maintenance | Maintenir la plateforme saine |
+| Patching | Appliquer des correctifs |
+| Support | Traiter un incident ou une demande Oracle |
 
+La maintenance inclut :
+
+```text
+revue capacité
+revue santé
+revue versions
+revue comptes
+revue certificats
+revue agents
+revue logs
+revue sauvegardes
+revue Data Guard
+revue documentation
+```
+
+---
+
+## 3. Revue capacité
+
+À vérifier :
+
+```text
+DATA
+RECO
+FRA
+TEMP
+UNDO
+croissance mensuelle
+archivelogs
+backups
+flashback logs
+tablespaces critiques
+```
+
+Commandes :
+
+```bash
+asmcmd lsdg
+```
+
+```sql
+select name, total_mb, free_mb, usable_file_mb, type, state
+from v$asm_diskgroup
+order by name;
+
+select * from v$recovery_file_dest;
+```
+
+Questions :
+
+```text
+Quelle est la croissance ?
+Quand atteindra-t-on le seuil critique ?
+Quel workload consomme ?
+Quelle action prévoir ?
+```
+
+---
+
+## 4. Revue santé
+
+À vérifier :
+
+```text
+CRS resources
+services RAC
+instances
+ASM
+Storage Cells
+alert history
+physical disks
+agents EM
+AHF/TFA
+```
+
+Commandes :
+
+```bash
+crsctl stat res -t
+srvctl status database -d <db_unique_name> -v
+srvctl status service -d <db_unique_name>
+cellcli -e "list alert history detail"
+cellcli -e "list physicaldisk attributes name,status,errormessage"
+```
+
+---
+
+## 5. Revue versions
+
+À vérifier :
+
+```text
+Oracle Database
+Grid Infrastructure
+Oracle Homes
+Exadata System Software
+firmware selon procédure
+EM agent
+AHF
+TFA
+Exachk
+```
+
+Commandes :
+
+```bash
+opatch lsinventory
+imageinfo
+imagehistory
+ahfctl status
+exachk -v
+```
+
+But :
+
+```text
+connaître l’état avant patching
+préparer support
+éviter les incohérences
+documenter la plateforme
+```
+
+---
+
+## 6. Revue sauvegarde et récupération
+
+À vérifier :
+
+```text
+backup récent
+archivelogs disponibles
+controlfile autobackup
+restore validate
+FRA/RECO
+Data Guard si présent
+RPO/RTO
+```
+
+Commandes :
+
+```bash
+rman target / <<EOF
+show all;
+list backup summary;
+report schema;
+EOF
+```
+
+```sql
+select log_mode, force_logging, database_role from v$database;
+select * from v$recovery_file_dest;
+```
+
+---
+
+## 7. Revue Data Guard
+
+Si Data Guard existe :
+
+```text
+configuration Broker
+database role
+open mode
+transport lag
+apply lag
+protection mode
+services standby
+tests de bascule
+```
+
+Commandes :
+
+```bash
+dgmgrl / "show configuration"
+```
+
+```sql
+select database_role, open_mode, protection_mode from v$database;
+select name, value, unit from v$dataguard_stats;
+```
+
+---
+
+## 8. Revue comptes et accès
+
+À vérifier selon politique sécurité :
+
+```text
+comptes DBA
+comptes applicatifs
+comptes techniques
+comptes OS
+comptes EM
+droits OCI si cloud
+mots de passe expirés
+comptes inutilisés
+```
+
+SQL indicatif :
+
+```sql
+select username, account_status, lock_date, expiry_date
+from dba_users
+order by username;
+```
+
+Attention :
+
+```text
+Toute modification de compte doit suivre la procédure sécurité.
+```
+
+---
+
+## 9. Revue certificats
+
+À vérifier :
+
+```text
+certificats listeners / wallets selon design
+certificats EM
+certificats agents
+certificats API ou intégrations
+certificats cloud selon contexte
+dates d’expiration
+```
+
+Objectif :
+
+```text
+éviter l’interruption d’une intégration ou d’une supervision.
+```
+
+---
+
+## 10. Revue logs
+
+À vérifier :
+
+```text
+alert logs database
+logs GI/CRS
+logs listener
+logs ASM
+logs cells
+logs OS
+taille des fichiers
+rotation
+rétention
+filesystem plein
+```
+
+Commandes OS read-only :
+
+```bash
+df -h
+du -sh <répertoire_log>
+```
+
+Selon procédure :
+
+```bash
+tfactl print status
+```
+
+---
+
+## 11. Revue documentation
+
+La documentation doit contenir :
+
+```text
+architecture
+noms serveurs
+versions
+services RAC
+bases/PDB
+DATA/RECO
+réseaux
+backup
+Data Guard
+contacts
+runbooks
+procédures escalade
+historique patching
+```
+
+À retenir :
+
+```text
+Une plateforme non documentée devient difficile à maintenir en incident.
+```
+
+---
+
+## 12. Fréquence recommandée
+
+| Fréquence | Tâches |
+|---|---|
+| Quotidien | alertes critiques, backup, Data Guard lag |
+| Hebdomadaire | capacité, services, cells, incidents |
+| Mensuel | versions, comptes, certificats, documentation |
+| Trimestriel | Exachk, patch readiness, exercice restore/bascule |
+| Avant changement | pré-check complet |
+| Après changement | post-check complet |
+
+---
+
+## 13. Tableau de maintenance mensuelle
+
+| Contrôle | Preuve | Statut | Action |
+|---|---|---|---|
+| ASM DATA/RECO | asmcmd lsdg | OK/KO | capacité |
+| FRA | v$recovery_file_dest | OK/KO | purge/backup |
+| CRS | crsctl stat res -t | OK/KO | analyse |
+| Services | srvctl status service | OK/KO | correction |
+| Cells | alert history | OK/KO | SR/action |
+| RMAN | list backup summary | OK/KO | backup |
+| Data Guard | v$dataguard_stats | OK/KO | analyse |
+| Versions | imageinfo/opatch | OK/KO | patch plan |
+| EM Agent | emctl status agent | OK/KO | correction |
+| Documentation | revue doc | OK/KO | mise à jour |
+
+---
+
+## 14. Erreurs fréquentes
+
+| Erreur | Pourquoi c’est dangereux | Correction |
+|---|---|---|
+| Maintenance non planifiée | Dérives invisibles | calendrier |
+| Confondre patching et maintenance | Revue insuffisante | séparer activités |
+| Ignorer capacité RECO | blocage archivelogs | suivi FRA |
+| Oublier documentation | incident difficile | mise à jour mensuelle |
+| Ne pas vérifier restore | backup théorique | restore validate |
+| Ignorer certificats | rupture supervision | revue expiration |
+| Pas de preuve | CAB faible | conserver sorties |
+
+---
+
+## 15. Commandes read-only utiles
+
+```bash
+crsctl stat res -t
+srvctl status database -d <db_unique_name> -v
+srvctl status service -d <db_unique_name>
+asmcmd lsdg
+cellcli -e "list alert history detail"
+cellcli -e "list physicaldisk attributes name,status,errormessage"
+imageinfo
+imagehistory
+opatch lsinventory
+ahfctl status
+emctl status agent
+```
+
+```sql
+select * from v$recovery_file_dest;
+select name, total_mb, free_mb, usable_file_mb from v$asm_diskgroup;
+select name, value, unit from v$dataguard_stats;
+select username, account_status, expiry_date from dba_users;
+```
+
+---
+
+## 16. Exercice pratique
+
+La revue mensuelle détecte :
+
+```text
+croissance FRA anormale
+agent monitoring en retard de version
+quelques alertes cell anciennes
+documentation non mise à jour
+```
+
+Répondez :
+
+1. Quels risques identifiez-vous ?
+2. Quelles preuves collectez-vous ?
+3. Quelles actions sont immédiates ?
+4. Quelles actions demandent CAB ?
+5. Quelle synthèse envoyez-vous à l’équipe ?
+
+---
+
+## 17. Corrigé indicatif
+
+Risques :
+
+```text
+FRA saturation
+perte supervision fiable
+alertes anciennes non qualifiées
+documentation non fiable
+```
+
+Preuves :
+
+```text
+v$recovery_file_dest
+asmcmd lsdg
+emctl status agent
+cellcli alert history
+imageinfo/opatch selon besoin
+```
+
+Conclusion :
+
+```text
+La maintenance doit produire des preuves, une priorisation et des actions.
+La croissance FRA doit être traitée avant blocage archivelogs.
+L’agent monitoring doit être remis à niveau selon procédure.
+```
+
+---
+
+## 18. À retenir
+
+```text
+À retenir
+- La maintenance prévient les incidents.
+- Elle est différente du patching.
+- Capacité DATA/RECO/FRA est prioritaire.
+- RMAN, Data Guard et restore doivent être vérifiés.
+- Versions, agents, comptes et certificats doivent être suivis.
+- La documentation fait partie de l’exploitation.
+- Une bonne maintenance produit des preuves et des actions.
+```
+
+---
+
+## 19. Références officielles
+
+| Référence | Utilisation |
+|---|---|
+| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Maintenance, administration, monitoring. |
+| [Oracle Database Administration Guide](https://docs.oracle.com/en/database/) | Comptes, vues DBA, maintenance DB. |
+| [Oracle Backup and Recovery Documentation](https://docs.oracle.com/en/database/) | RMAN, restore, recovery. |
+| [Oracle AHF Documentation](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | Exachk, TFA, santé plateforme. |
