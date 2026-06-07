@@ -1,16 +1,11 @@
 # Oracle Exadata Database Machine Administration Workshop — Support de cours français V5
 
-Cette version est la **V5 — finition expert Exadata** du support de cours français consacré à **Oracle Exadata Database Machine Administration Workshop**.
+**Auteur : Zidane Djamal**  
+**Rôle : Expert infrastructure Oracle / Exadata / HA-DR / exploitation DBA**
 
-L’objectif du dépôt est de fournir un parcours pédagogique complet, aligné avec l’esprit du workshop officiel Oracle : comprendre les concepts, mais aussi savoir raisonner comme un DBA / exploitant Exadata sur la configuration, le stockage, la performance, la migration, le monitoring, la sauvegarde, la haute disponibilité, la maintenance, le patching et l’écosystème de support.
+Ce dépôt fournit un **support de cours français complet** consacré à **Oracle Exadata Database Machine Administration Workshop**.
 
-Cette V5 corrige les limites des versions précédentes :
-- suppression des formulations trop génériques ;
-- réécriture des modules critiques ;
-- structuration du README comme vrai plan de cours ;
-- clarification des objectifs opérationnels ;
-- maintien d’une approche prudente avec commandes de lecture et de diagnostic ;
-- ajout de rapports de validation et d’audit.
+L’objectif est de disposer d’un parcours pédagogique structuré pour comprendre, administrer et diagnostiquer une plateforme Oracle Exadata : architecture, configuration initiale, stockage, ASM, performance, migration, monitoring, sauvegarde, haute disponibilité, maintenance, patching, support et variantes cloud.
 
 Le dépôt tiers suivant reste séparé et peut être utilisé comme complément d’architecture infrastructure / HA / DR :
 
@@ -110,8 +105,8 @@ Le lecteur doit savoir :
 Le lecteur doit savoir :
 
 - expliquer Smart Scan ;
-- lire un plan SQL avec `DBMS_XPLAN`;
-- interpréter `cell_offload_eligible_bytes` et `cell_offload_returned_bytes`;
+- lire un plan SQL avec `DBMS_XPLAN` ;
+- interpréter `cell_offload_eligible_bytes` et `cell_offload_returned_bytes` ;
 - comprendre Storage Index, HCC, Flash Cache et Direct Path Read ;
 - diagnostiquer pourquoi Smart Scan ne s’active pas ;
 - comprendre IORM et sa relation avec Database Resource Manager ;
@@ -282,30 +277,7 @@ L’ordre numérique des fichiers est conservé, mais l’ordre pédagogique con
 
 ---
 
-## 6. Rapports et contrôles V5
-
-| Document | Rôle |
-|---|---|
-| `docs/98-audit-finition-expert-v5.md` | Audit de finition expert V5 et preuves de correction. |
-| `docs/99-rapport-completude-final.md` | Rapport final de complétude V5. |
-| `v5_validation_report.md` | Rapport technique de validation automatisée. |
-
----
-
-## 7. Scripts de contrôle
-
-Les scripts doivent rester prudents et orientés diagnostic.
-
-```bash
-bash scripts/completeness-check.sh
-bash scripts/dangerous-command-detector.sh
-```
-
-Selon les besoins, d’autres scripts read-only peuvent être utilisés pour inventorier ou vérifier l’environnement, sans effectuer d’action destructive.
-
----
-
-## 8. Contrôles recommandés après modification
+## 6. Contrôles recommandés après modification
 
 Après modification d’un module ou du README :
 
@@ -326,12 +298,12 @@ Commit type :
 
 ```bash
 git add README.md
-git commit -m "docs: rewrite README as operational V5 course plan"
+git commit -m "docs: finalize README V5 course plan"
 ```
 
 ---
 
-## 9. Règle de travail interactive
+## 7. Méthode de travail interactive
 
 La méthode de travail retenue pour cette V5 est :
 
@@ -370,20 +342,7 @@ modules/27-exadata-cloud-service-et-cloud-customer.md
 
 ---
 
-## 10. État actuel de la V5
-
-Les modules suivants ont déjà été réécrits comme chapitres experts propres :
-
-| Module | Statut |
-|---:|---|
-| 08 — IORM | Réécriture V5 propre validée |
-| 10 — Smart Scan | Réécriture V5 propre validée |
-
-Les autres modules doivent être relus progressivement selon la méthode interactive.
-
----
-
-## 11. Licence et usage
+## 8. Usage
 
 Ce dépôt est un support de travail pédagogique.  
 Les commandes doivent être adaptées à l’environnement réel, à la version Oracle, aux règles d’exploitation, aux licences et aux procédures internes.
