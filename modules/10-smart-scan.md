@@ -1,128 +1,359 @@
 # Module 10 — Smart Scan
 
-## 1. Objectif pédagogique
+## 1. Objectif du module
 
-À la fin de ce module, le lecteur doit être capable d’expliquer précisément ce qu’est **Smart Scan** dans Oracle Exadata, pourquoi cette fonctionnalité est propre à l’architecture Exadata, et dans quelles conditions elle réduit le volume de données transféré entre les **storage cells** et les **database servers**. L’objectif n’est pas de retenir une définition générale, mais de savoir raisonner sur un SQL réel, son plan d’exécution, ses statistiques d’I/O et ses métriques `cell%`.
+Ce module explique **Smart Scan**, une des capacités majeures d’Oracle Exadata.
 
-Le lecteur doit savoir distinguer un scan classique, où les blocs Oracle sont remontés vers l’instance pour être filtrés, d’un scan Exadata optimisé, où une partie du traitement SQL est exécutée au plus près des données dans les storage cells. Il doit également comprendre le rôle de l’**offload SQL**, du **predicate filtering**, de la **column projection**, du **Direct Path Read**, des scans volumineux et des mécanismes complémentaires comme **Storage Index** et **Hybrid Columnar Compression**.
+L’objectif est de comprendre pourquoi Smart Scan existe, où il agit, dans quelles conditions il fonctionne et comment prouver son effet avec un plan SQL et des métriques.
 
-Un diagnostic Smart Scan ne se limite jamais à constater qu’une requête est lente ou rapide. Il consiste à relier le plan SQL, les opérations de type `TABLE ACCESS STORAGE FULL`, les prédicats réellement évaluables côté cellule, les colonnes demandées, les compteurs `cell_offload_eligible_bytes`, `cell_offload_returned_bytes`, `physical_read_bytes`, les statistiques système `cell physical IO%`, et les attentes d’exécution de type `cell smart table scan`.
+À la fin de ce module, le lecteur doit être capable de :
 
-## 2. Pourquoi Smart Scan est important dans Exadata
+- expliquer ce qu’est Smart Scan ;
+- distinguer scan classique et Smart Scan ;
+- comprendre le rôle des Storage Cells ;
+- comprendre le lien entre Smart Scan et Offload SQL ;
+- expliquer Predicate Filtering ;
+- expliquer Column Projection ;
+- comprendre le rôle de Direct Path Read ;
+- reconnaître les plans SQL compatibles ;
+- lire les métriques `cell%` ;
+- éviter de dire que Smart Scan accélère toutes les requêtes.
 
-Oracle Exadata associe des database servers, des storage cells intelligentes et un réseau interne très rapide. Dans une architecture classique, la baie de stockage livre des blocs au serveur de base de données, puis l’instance Oracle applique les prédicats, sélectionne les colonnes utiles et rejette les lignes non pertinentes. Dans Exadata, Smart Scan change ce modèle pour certains accès volumineux : une partie du traitement de recherche et de projection est envoyée aux storage cells, ce qui réduit le volume de données renvoyé vers les database servers lorsque les conditions techniques sont réunies.[1]
+---
 
-Cette approche est importante parce que les workloads analytiques, décisionnels, de consolidation et de reporting lisent souvent des volumes importants pour ne conserver qu’une fraction des lignes et des colonnes. Si une table de plusieurs téraoctets contient cent colonnes mais que la requête ne demande que trois colonnes et filtre 99 % des lignes, remonter tous les blocs vers l’instance consomme inutilement l’interconnect, les CPU des database servers et le temps d’attente des sessions. Smart Scan vise précisément à éviter ce transfert inutile dans les cas compatibles.[1] [2]
+## 2. Pourquoi Smart Scan est important
 
-Smart Scan n’est toutefois pas une promesse universelle. Il ne s’applique pas à toutes les requêtes, ni à tous les chemins d’accès. Il est principalement associé à des scans complets ou rapides complets, à des lectures séquentielles importantes et au mécanisme **Direct Path Read**. Oracle indique que Smart Scan optimise notamment les full table scans, fast full index scans et fast full bitmap index scans utilisant Direct Path Read.[1]
+Dans une architecture Oracle classique, le stockage renvoie principalement des blocs au serveur de base de données.
 
-## 3. Concepts clés
+Le Database Server doit ensuite :
 
-| Concept | Définition | Exemple concret | À ne pas confondre avec |
-|---|---|---|---|
-| Smart Scan | Fonction Exadata qui exécute certains traitements de recherche et de projection dans les storage cells.[1] | Une requête lit une grande table de ventes et ne renvoie que les lignes d’une région. | Une optimisation SQL disponible sur tout stockage. |
-| Offload SQL | Déport d’une partie du travail SQL vers les storage cells.[2] | Le filtre `amount > 1000` est transmis aux cells. | Le parallélisme SQL seul. |
-| Predicate Filtering | Évaluation côté cellule de prédicats compatibles. | `region = 'EMEA' and amount >= 1000`. | Un filtre appliqué uniquement après réception des blocs. |
-| Column Projection | Sélection côté cellule des colonnes nécessaires. | `select customer_id, amount` sur une table très large. | La compression de table. |
-| Direct Path Read | Mode de lecture direct utilisé par certains grands scans. | Une requête parallèle lit une grande table hors chemin bufferisé principal. | Une lecture logique depuis le buffer cache. |
-| Full Table Scan | Lecture complète d’une table. | `TABLE ACCESS STORAGE FULL SALES`. | Un accès index très sélectif. |
-| Cell Smart Table Scan | Activité ou attente liée à une lecture intelligente de table. | `cell smart table scan` dans les attentes. | `db file scattered read` sur stockage classique. |
-| Eligible Bytes | Volume considéré comme éligible à l’offload. | `cell_offload_eligible_bytes = 900 Go`. | Le volume retourné au database server. |
-| Returned Bytes | Volume renvoyé après filtrage/projection côté cell. | `cell_offload_returned_bytes = 20 Go`. | Le volume lu physiquement. |
-| Storage Index | Métadonnées cell permettant d’éviter certaines régions de stockage. | Un filtre de date exclut des régions entières. | Un index B-tree Oracle. |
-| HCC | Hybrid Columnar Compression, souvent favorable aux scans analytiques Exadata.[1] | Table historique compressée et scannée avec projection. | Compression OLTP classique. |
+```text
+lire les blocs
+filtrer les lignes
+sélectionner les colonnes utiles
+exécuter les jointures et agrégations
+renvoyer le résultat
+```
 
-Ces concepts doivent être étudiés ensemble. Un plan peut mentionner `STORAGE`, mais le gain réel dépend du volume éligible, des prédicats offloadables, de la sélectivité, de la projection de colonnes, de l’état des statistiques, du degré de parallélisme et de la part de lecture directe.
+Dans Exadata, les Storage Cells peuvent participer à certains scans.
+
+Elles peuvent :
+
+```text
+appliquer certains filtres
+ne renvoyer que certaines colonnes
+réduire le volume transféré
+éviter certaines lectures
+retourner moins de données au Database Server
+```
+
+À retenir :
+
+```text
+Smart Scan ne rend pas seulement le stockage plus rapide.
+Il permet surtout de réduire ce qui remonte vers le Database Server.
+```
+
+---
+
+## 3. Scan classique vs Smart Scan
+
+### 3.1 Scan classique
+
+```text
+Application
+→ Database Server
+→ Stockage SAN/NAS
+→ blocs retournés
+→ Database Server filtre et projette
+→ résultat
+```
+
+Dans ce modèle, le stockage est essentiellement passif.
+
+Il renvoie des blocs, même si une grande partie sera rejetée ensuite.
+
+### 3.2 Smart Scan Exadata
+
+```text
+Application
+→ Database Server
+→ demande iDB
+→ Storage Cells
+→ lecture flash/disques
+→ filtrage/projection côté cell si possible
+→ retour réduit
+→ Database Server finalise
+→ résultat
+```
+
+Dans ce modèle, les Storage Cells sont actives.
+
+Elles peuvent participer au traitement.
+
+---
 
 ## 4. Architecture Smart Scan
 
-Smart Scan repose sur une coopération entre l’optimiseur Oracle Database, les database servers, les storage cells, ASM et le réseau interne Exadata. La session SQL s’exécute côté database server, mais certaines opérations de scan sont décrites dans des requêtes internes envoyées aux storage cells. Les cells lisent les extents gérés par ASM, appliquent les traitements compatibles, puis renvoient au database server un résultat réduit plutôt que l’intégralité des blocs.
+Smart Scan repose sur la coopération entre :
 
-Les **database servers** hébergent les instances Oracle, les sessions utilisateurs, l’optimiseur, les plans d’exécution et les opérations SQL qui ne sont pas déportées. Ils conservent la responsabilité de la cohérence transactionnelle, de l’assemblage final du résultat, des joins non déportés, des agrégations non offloadées et de la majorité de la logique SQL complexe.
-
-Les **storage cells** ne sont pas de simples disques. Elles exécutent Oracle Exadata System Software, accèdent aux disques et au flash, maintiennent des statistiques internes et exécutent des fonctions spécialisées comme Smart Scan, Storage Index, IORM et les traitements associés à HCC. Dans le cas de Smart Scan, la cell reçoit la demande de scan, lit les données, applique les filtres et projections compatibles, puis renvoie au database server un flux réduit.
-
-Le réseau interne **RoCE** ou **InfiniBand** fournit une faible latence et un haut débit entre database servers et storage cells. Smart Scan ne rend pas ce réseau inutile ; il cherche à éviter qu’il transporte des données qui seront immédiatement rejetées par l’instance. Plus l’écart entre les bytes éligibles et les bytes retournés est grand, plus la réduction du trafic interconnect est visible.
-
-```mermaid
-flowchart LR
-    A[Session SQL] --> B[Database Server]
-    B --> C[Plan d'exécution]
-    C --> D{Accès compatible Smart Scan ?}
-    D -- Non --> E[Lecture classique vers DB Server]
-    D -- Oui --> F[Requête iDB vers Storage Cells]
-    F --> G[Predicate Filtering]
-    G --> H[Column Projection]
-    H --> I[Storage Index / HCC si applicable]
-    I --> J[Résultat réduit renvoyé au DB Server]
+```text
+Oracle Database
+Database Server
+Optimiseur SQL
+ASM
+Protocole iDB
+Réseau interne RoCE / InfiniBand
+Storage Cells
+Exadata System Software
+Flash / disques
 ```
 
-## 5. Fonctionnement détaillé
+Schéma logique :
 
-Dans un scan classique sur stockage non intelligent, l’instance Oracle demande des blocs au stockage, reçoit ces blocs, puis applique les prédicats dans le moteur SQL. Même si une seule ligne sur mille satisfait le filtre, les blocs traversent la chaîne I/O jusqu’au database server. L’instance extrait ensuite les lignes et colonnes nécessaires, rejette le reste, puis poursuit l’exécution du plan.
+```mermaid
+sequenceDiagram
+    participant APP as Application
+    participant DB as Database Server
+    participant ASM as ASM
+    participant CELL as Storage Cell
+    participant DISK as Flash / Disques
 
-Smart Scan modifie ce chemin pour certains scans Exadata. Lorsque l’optimiseur et le moteur d’exécution choisissent un accès compatible, Oracle Database envoie aux storage cells une demande de scan enrichie : quelles colonnes sont nécessaires, quels prédicats peuvent être évalués côté cellule, quelles portions du segment sont à lire et quel contexte d’exécution s’applique. La cell lit alors les données depuis disque ou flash, applique les filtres admissibles, projette les colonnes demandées, exploite éventuellement Storage Index ou HCC, puis renvoie un résultat plus petit vers le database server.[1] [2]
+    APP->>DB: Requête SQL
+    DB->>DB: Parse / Optimisation / Plan
+    DB->>ASM: Localisation des extents
+    DB->>CELL: Demande iDB avec prédicats / colonnes
+    CELL->>DISK: Lecture données
+    CELL->>CELL: Predicate Filtering si possible
+    CELL->>CELL: Column Projection si possible
+    CELL-->>DB: Résultat réduit ou blocs
+    DB-->>APP: Résultat final
+```
 
-Le **predicate filtering** est l’un des gains les plus visibles. Si la requête contient `where sale_date >= date '2026-01-01' and amount > 1000`, une cell peut éliminer les lignes qui ne satisfont pas les prédicats compatibles avant que ces lignes ne circulent sur l’interconnect. Oracle documente plusieurs opérateurs conditionnels pris en charge, notamment `=`, `!=`, `<`, `>`, `<=`, `>=`, `IS NULL`, `LIKE`, `BETWEEN`, `IN`, ainsi que des combinaisons logiques comme `AND` et `OR`.[1]
+---
 
-La **column projection** évite de renvoyer des colonnes inutiles. Dans une table large, une requête analytique peut demander uniquement `customer_id`, `sale_date` et `amount`. Avec Smart Scan, la cell renvoie seulement les colonnes utiles lorsque la structure et le plan le permettent. Oracle souligne que ce gain peut être substantiel pour les tables contenant de nombreuses colonnes ou des colonnes volumineuses.[1]
+## 5. Définition de Smart Scan
 
-Le **Direct Path Read** est central parce que Smart Scan vise surtout les grands scans séquentiels et les opérations parallèles. Les index lookups très sélectifs ne bénéficient généralement pas de Smart Scan parce qu’ils n’ont pas besoin de lire un grand volume. Si un index unique permet de trouver une ligne client, forcer un scan complet pour obtenir Smart Scan serait souvent une dégradation.
+Smart Scan est un mécanisme Exadata permettant aux Storage Cells d’exécuter une partie de certains scans SQL.
 
-Certaines **fonctions SQL** ou expressions peuvent limiter l’offload. Appliquer une fonction non compatible sur une colonne filtrée peut empêcher la cell d’évaluer le prédicat. Un filtre `where trunc(sale_date) = date '2026-01-01'` peut être moins favorable qu’un intervalle explicite `where sale_date >= date '2026-01-01' and sale_date < date '2026-01-02'`. La règle pratique est de vérifier le plan, les predicate informations et les métriques plutôt que de supposer que tout filtre est offloadable.
+Il peut réduire :
 
-**Storage Index** complète Smart Scan en évitant parfois des lectures physiques. Les cells maintiennent des informations de type min/max sur des régions de stockage. Si un prédicat ne peut pas correspondre aux valeurs d’une région, la cell peut éviter de lire cette région. **HCC** peut aussi améliorer les scans analytiques parce que les données compressées en colonnes hybrides se prêtent bien aux lectures de colonnes et aux filtrages de grands volumes.[1]
+```text
+le volume de données retourné
+le trafic sur le réseau interne
+le travail CPU côté Database Server
+le temps d’attente de certaines requêtes analytiques
+```
 
-## 6. Comparaison scan classique vs Smart Scan
+Smart Scan est surtout visible sur :
 
-| Étape | Scan classique | Smart Scan |
-|---|---|---|
-| Lecture | Les blocs sont remontés vers le database server. | Les cells lisent les données et peuvent renvoyer un résultat déjà filtré et projeté. |
-| Filtrage | Les prédicats sont principalement évalués côté instance. | Les prédicats compatibles peuvent être évalués côté storage cell. |
-| Projection | Des colonnes non utiles peuvent contribuer au volume remonté. | Les colonnes demandées peuvent être sélectionnées côté cell. |
-| Trafic interconnect | Plus élevé quand beaucoup de données inutiles circulent. | Réduit si l’offload élimine lignes ou colonnes. |
-| Conditions | Accès standard, lectures bufferisées ou chemins non compatibles. | Accès compatible offload, grand scan, Direct Path Read, prédicats admissibles. |
-| Indicateurs | Attentes I/O classiques, peu de métriques `cell_offload%`. | `cell smart table scan`, bytes éligibles, bytes retournés. |
-| Cas favorable | Accès index très sélectif, petits objets, données utiles en cache. | Scan volumineux avec forte sélectivité et table large. |
+```text
+grandes tables
+scans volumineux
+requêtes analytiques
+reporting
+data warehouse
+full table scans
+fast full index scans
+direct path reads
+```
 
-Le piège le plus courant consiste à considérer Smart Scan comme systématiquement supérieur. Pour une requête de recherche unitaire, un index lookup peut être le meilleur choix. Pour une requête analytique qui lit des centaines de gigaoctets et élimine l’essentiel des lignes, Smart Scan devient au contraire un levier majeur.
+---
 
-## 7. Commandes et vues utiles
+## 6. Offload SQL
 
-Les commandes suivantes sont des requêtes de diagnostic en lecture seule. Elles doivent être exécutées avec les privilèges appropriés et adaptées au contexte de l’environnement. Leur objectif est de produire des preuves : plan réel, bytes éligibles, bytes retournés, statistiques système et événements d’attente.
+Smart Scan est lié à l’**Offload SQL**.
+
+Offload SQL signifie qu’une partie du traitement SQL est déportée vers les Storage Cells.
+
+Ce qui peut être déporté selon conditions :
+
+```text
+certains prédicats WHERE
+projection de colonnes
+certains traitements sur données compressées
+certains scans compatibles
+```
+
+Ce qui reste côté Database Server :
+
+```text
+cohérence transactionnelle
+parse et optimisation
+jointures non offloadées
+agrégations non offloadées
+tri final
+résultat final
+transactions
+```
+
+À retenir :
+
+```text
+La Storage Cell aide le Database Server.
+Elle ne remplace pas Oracle Database.
+```
+
+---
+
+## 7. Predicate Filtering
+
+### 7.1 Définition
+
+Predicate Filtering signifie que certains filtres peuvent être évalués dans la Storage Cell.
+
+Exemple :
+
+```sql
+select customer_id, amount
+from sales
+where region = 'FR'
+and amount > 1000;
+```
+
+Si les prédicats sont compatibles, la Storage Cell peut éliminer des lignes avant de les retourner.
+
+### 7.2 Apport
+
+```text
+moins de lignes retournées
+moins de trafic interconnect
+moins de travail côté Database Server
+meilleure efficacité sur grands volumes
+```
+
+### 7.3 Exemple logique
+
+```text
+Table : 1 milliard de lignes
+Filtre utile : 1 % des lignes
+Sans Smart Scan : beaucoup de blocs remontent
+Avec Smart Scan : les cells peuvent renvoyer beaucoup moins de lignes
+```
+
+---
+
+## 8. Column Projection
+
+### 8.1 Définition
+
+Column Projection signifie que la Storage Cell peut ne retourner que les colonnes demandées.
+
+Exemple :
+
+```sql
+select customer_id, amount
+from sales
+where region = 'FR';
+```
+
+Si la table contient 80 colonnes mais que la requête en demande 2, Exadata peut réduire le volume retourné.
+
+### 8.2 Apport
+
+```text
+moins de colonnes transférées
+moins de données sur le réseau interne
+meilleure efficacité pour tables larges
+```
+
+À retenir :
+
+```text
+Predicate Filtering réduit les lignes.
+Column Projection réduit les colonnes.
+```
+
+---
+
+## 9. Direct Path Read
+
+Smart Scan est généralement associé aux accès de type **Direct Path Read**.
+
+Direct Path Read permet de lire de grands volumes sans passer par le chemin classique du buffer cache de la même manière qu’un accès OLTP.
+
+Cas favorables :
+
+```text
+full table scan
+fast full index scan
+requête parallèle
+grand volume
+traitement analytique
+```
+
+Cas moins favorables :
+
+```text
+index unique très sélectif
+lecture d’une seule ligne
+petites requêtes OLTP
+accès déjà dans le buffer cache
+```
+
+---
+
+## 10. Plans SQL compatibles
+
+Dans un plan SQL, on peut voir :
+
+```text
+TABLE ACCESS STORAGE FULL
+INDEX STORAGE FAST FULL SCAN
+STORAGE
+storage predicates
+```
+
+Exemple :
 
 ```sql
 select *
-from table(dbms_xplan.display_cursor(:sql_id, null, 'ALLSTATS LAST +IOSTATS +PREDICATE'));
+from table(dbms_xplan.display_cursor('<sql_id>', null, 'ALLSTATS LAST +PREDICATE'));
 ```
 
-Cette requête montre les opérations du plan réellement exécuté, les lignes estimées et observées, les statistiques d’I/O et les prédicats. Pour Smart Scan, il faut rechercher des opérations comme `TABLE ACCESS STORAGE FULL`, `INDEX STORAGE FAST FULL SCAN`, des predicate informations cohérentes, ainsi que des écarts entre estimation et réalité. Oracle documente `DBMS_XPLAN.DISPLAY_CURSOR` comme une fonction permettant d’afficher le plan d’exécution d’un curseur chargé.[3]
+À chercher :
 
-```sql
-select sql_id,
-       cell_offload_eligible_bytes,
-       cell_offload_returned_bytes,
-       physical_read_bytes
-from v$sql
-where sql_id = :sql_id;
+```text
+TABLE ACCESS STORAGE FULL
+Predicate Information
+storage(...)
+filter(...)
+actual rows
+bytes
 ```
 
-`cell_offload_eligible_bytes` indique le volume qui pouvait être soumis à l’offload. `cell_offload_returned_bytes` indique le volume renvoyé après les traitements côté cell. `physical_read_bytes` donne le volume de lectures physiques associé au SQL. Une lecture favorable montre souvent un eligible bytes élevé et un returned bytes beaucoup plus faible.
+Attention :
+
+```text
+Voir STORAGE dans le plan ne suffit pas.
+Il faut vérifier les métriques pour prouver le gain réel.
+```
+
+---
+
+## 11. Métriques Smart Scan
+
+Les métriques sont indispensables.
+
+### 11.1 Statistiques globales
 
 ```sql
 select name, value
 from v$sysstat
-where name in (
-  'cell physical IO bytes eligible for predicate offload',
-  'cell physical IO bytes saved by storage index',
-  'cell physical IO interconnect bytes returned',
-  'cell smart table scan',
-  'cell smart index scan'
-)
+where name like 'cell%'
 order by name;
 ```
 
-Cette requête montre des compteurs cumulés au niveau de l’instance. Elle s’utilise avant et après un test, ou dans une observation de tendance, pour vérifier si le système réalise des scans intelligents, combien de bytes sont éligibles, combien sont renvoyés sur l’interconnect et combien sont évités par Storage Index.
+Métriques importantes :
+
+```text
+cell physical IO bytes eligible for predicate offload
+cell physical IO interconnect bytes
+cell physical IO interconnect bytes returned by smart scan
+cell scans
+```
+
+### 11.2 Wait events
 
 ```sql
 select event, total_waits, time_waited
@@ -131,137 +362,316 @@ where event like 'cell%'
 order by time_waited desc;
 ```
 
-Cette requête observe les attentes `cell%` au niveau système. Pour un diagnostic de session, elle doit être complétée par une lecture de `v$session` ou par SQL Monitor lorsque ces sources sont disponibles.
+Exemples :
 
-## 8. Interprétation des métriques
-
-| Métrique | Signification | Interprétation |
-|---|---|---|
-| `cell_offload_eligible_bytes` | Volume du SQL considéré comme éligible à l’offload. | Une valeur élevée indique que le SQL a emprunté un chemin où Smart Scan pouvait intervenir. Une valeur nulle oriente vers un accès non compatible, un petit objet, un accès index lookup, un chemin bufferisé ou un curseur différent. |
-| `cell_offload_returned_bytes` | Volume renvoyé par les cells au database server après traitement. | Une valeur très inférieure à l’eligible bytes suggère une réduction efficace. Une valeur proche indique que l’offload n’a pas beaucoup réduit le flux. |
-| `physical_read_bytes` | Volume de lecture physique associé au SQL. | Cette valeur aide à comprendre le volume réellement lu. Elle doit être comparée aux bytes retournés et au plan. |
-| `cell physical IO bytes eligible for predicate offload` | Statistique système cumulée des bytes éligibles. | Elle confirme une activité offload au niveau instance, surtout sur une différence avant/après test. |
-| `cell physical IO bytes saved by storage index` | Bytes évités grâce à Storage Index. | Une valeur élevée montre que les cells éliminent des régions de stockage avant lecture complète. |
-| `cell physical IO interconnect bytes returned` | Volume retourné par les cells sur l’interconnect. | À comparer au volume éligible. Une baisse relative indique que le trafic réseau interne a été réduit. |
-| `cell smart table scan` | Indicateur d’activité ou d’attente lié aux scans intelligents de table. | Sa présence est un signal favorable pour un full table scan compatible. |
-| `cell smart index scan` | Indicateur lié aux scans intelligents d’index compatibles. | Il peut apparaître pour des fast full index scans, mais ne doit pas être attendu pour chaque accès index. |
-
-Un eligible bytes nul indique que la requête observée n’a probablement pas utilisé un chemin éligible. Un returned bytes proche de l’eligible bytes signifie que Smart Scan peut être présent mais peu sélectif. Une valeur élevée de `cell physical IO bytes saved by storage index` montre que Storage Index a évité des lectures. L’absence de `cell smart table scan` impose de vérifier le plan, le chemin d’accès et le mode de lecture.
-
-## 9. Pourquoi Smart Scan ne se déclenche pas
-
-| Cause possible | Explication | Vérification |
-|---|---|---|
-| Index lookup très sélectif | L’optimiseur choisit un accès index parce qu’il lit très peu de blocs. | Lire le plan : `INDEX UNIQUE SCAN`, `INDEX RANGE SCAN`, nested loops sur peu de lignes. |
-| Pas de Direct Path Read | Le chemin de lecture ne correspond pas au mode généralement associé aux grands scans offloadables. | Examiner le plan, les statistiques d’I/O et les événements d’attente. |
-| Petit objet | Le coût de mise en œuvre d’un grand scan direct n’est pas justifié. | Vérifier la taille du segment et les statistiques objet. |
-| Données dans buffer cache | La requête peut être servie depuis le cache de l’instance. | Comparer logical reads, physical reads et attentes. |
-| Fonction non offloadable | Une expression peut empêcher la cell d’évaluer le prédicat. | Lire les predicate informations et tester une forme plus simple. |
-| Prédicat incompatible | Tous les prédicats ne sont pas transmissibles aux cells. | Identifier les prédicats dans `DBMS_XPLAN`. |
-| Statistiques obsolètes | L’optimiseur peut choisir un chemin d’accès non représentatif. | Contrôler statistiques, histogrammes et cardinalités estimées/réelles. |
-| Plan SQL différent | Le SQL_ID peut avoir plusieurs child cursors. | Vérifier `child_number`, plan hash value et contexte d’exécution. |
-| Attente irréaliste sur une requête OLTP | Les requêtes unitaires très sélectives n’ont pas vocation à utiliser Smart Scan. | Classer le SQL : OLTP lookup ou scan analytique. |
-
-Dans la pratique, la cause la plus fréquente n’est pas une défaillance Exadata, mais une hypothèse incorrecte sur le plan. L’équipe pense que le SQL scanne une grande table, alors que l’optimiseur choisit un index. Ou bien elle pense que le prédicat est très sélectif, alors que la distribution réelle renvoie une grande partie de la table.
-
-## 10. Erreurs fréquentes
-
-La première erreur consiste à croire que Smart Scan s’applique à toutes les requêtes exécutées sur Exadata. Exadata rend Smart Scan possible, mais le moteur Oracle choisit le chemin d’accès selon le SQL, les statistiques, les objets et le contexte.
-
-La deuxième erreur consiste à forcer des paramètres internes sans preuve. Lorsqu’un comportement semble anormal malgré un plan et des métriques bien collectés, la voie saine consiste à documenter le SQL_ID, la version, le plan, les statistiques et les métriques Exadata.
-
-La troisième erreur consiste à confondre performance SQL et offload. Un SQL peut bénéficier de Smart Scan et rester lent parce qu’il lit énormément de données, effectue des joins coûteux, trie massivement ou subit un parallélisme mal dimensionné. Inversement, un SQL sans Smart Scan peut être optimal s’il lit quelques blocs par un index sélectif.
-
-La quatrième erreur consiste à ignorer le plan d’exécution. Sans le plan réel, il est impossible de savoir si l’absence d’offload vient d’un index lookup, d’un full table scan non direct, d’un child cursor différent, d’une estimation de cardinalité incorrecte ou d’un prédicat non transmissible.
-
-La cinquième erreur consiste à regarder seulement le temps de réponse. Le temps varie avec le cache, la concurrence, le parallélisme, la charge des cells, le CPU database server et le réseau. Les bytes éligibles et retournés apportent une preuve plus stable du comportement d’offload.
-
-## 11. Bonnes pratiques
-
-La première bonne pratique est de toujours lire le plan réel avant de conclure. Utilisez `DBMS_XPLAN.DISPLAY_CURSOR` avec le bon `sql_id`, le bon child cursor si nécessaire, et des options permettant de voir les statistiques d’exécution et les prédicats.
-
-La deuxième bonne pratique est de comparer `cell_offload_eligible_bytes` et `cell_offload_returned_bytes`. Ce ratio est l’un des indicateurs les plus utiles pour juger l’efficacité de Smart Scan. Un ratio fortement réduit soutient l’idée d’un offload efficace. Un ratio proche de 1 signifie souvent que le SQL conserve une grande partie des données lues.
-
-La troisième bonne pratique est de vérifier les prédicats. Les prédicats simples, sélectifs et exprimés directement sur les colonnes sont généralement plus lisibles et plus favorables au diagnostic. Les fonctions appliquées aux colonnes filtrées, les conversions implicites, les expressions complexes et les types mal alignés doivent être examinés attentivement.
-
-La quatrième bonne pratique est de vérifier le Direct Path Read et le volume. Smart Scan vise les grands scans. Si l’objet est petit, si les données sont servies depuis le buffer cache ou si le plan lit quelques blocs, l’absence d’offload peut être normale.
-
-La cinquième bonne pratique est de maintenir les statistiques. Des statistiques obsolètes peuvent amener l’optimiseur à choisir un index alors qu’un scan serait plus adapté, ou l’inverse. Les écarts entre lignes estimées et lignes réelles dans le plan sont des signaux importants.
-
-## 12. Scénario complet
-
-Une équipe exploite une application de reporting sur Exadata. Une requête analytique sur la table `SALES_FACT` est lente pendant la fenêtre de clôture. La table contient plusieurs années de ventes, des colonnes de mesure, des dimensions dénormalisées et des attributs de segmentation. L’équipe pense que Smart Scan devrait réduire fortement le volume lu, car la requête filtre sur `sale_date`, `region_code` et `amount`, puis ne sélectionne que quelques colonnes.
-
-```sql
-select /* reporting_cloture */
-       customer_id,
-       sale_date,
-       amount,
-       channel_code
-from sales_fact
-where trunc(sale_date) = date '2026-05-31'
-  and region_code = 'EMEA'
-  and amount > 1000;
+```text
+cell smart table scan
+cell smart index scan
+cell multiblock physical read
+cell single block physical read
 ```
 
-Le premier réflexe consiste à lire le plan réel. Si le plan montre `TABLE ACCESS STORAGE FULL SALES_FACT`, la requête emprunte au moins un chemin compatible avec un scan Exadata. Si le plan montre un `INDEX RANGE SCAN` suivi de nombreux accès table, il faut vérifier si ce choix est réellement coûteux ou si l’optimiseur a raison.
+### 11.3 SQL Monitor / DBMS_XPLAN
 
-Le deuxième réflexe consiste à vérifier les prédicats. Le filtre `trunc(sale_date) = date '2026-05-31'` peut être moins favorable qu’une forme par intervalle :
+À lire :
 
-```sql
-sale_date >= date '2026-05-31'
-and sale_date <  date '2026-06-01'
+```text
+plan réel
+lignes réelles
+bytes réels
+prédicats storage
+prédicats filter
+temps par opération
 ```
 
-Le troisième réflexe consiste à comparer les bytes. Si `v$sql` indique 1,2 To de `cell_offload_eligible_bytes` et 1,05 To de `cell_offload_returned_bytes`, l’offload existe peut-être, mais la réduction est faible. Si, au contraire, returned bytes tombe à 35 Go, l’offload est efficace et la lenteur doit être cherchée ailleurs : join, tri, agrégation, parallélisme, CPU ou concurrence.
+---
 
-La conclusion prudente pourrait être la suivante : « Le SQL utilise un accès de type scan Exadata, mais l’efficacité de Smart Scan est limitée car le volume retourné reste proche du volume éligible. Le prédicat sur `sale_date` doit être reformulé sans fonction, les statistiques de `SALES_FACT` et la distribution de `region_code` doivent être vérifiées, puis un test contrôlé doit comparer plan, eligible bytes, returned bytes et temps de réponse. »
+## 12. Interpréter les bytes
 
-## 13. Exercice pratique
+La distinction la plus importante :
 
-À partir d’un `SQL_ID` fourni par l’équipe DBA, construisez un diagnostic Smart Scan complet. L’objectif n’est pas de prouver à tout prix que Smart Scan doit s’activer, mais de produire une analyse structurée indiquant si le SQL est éligible, si l’offload est visible, si l’offload est efficace, et quelles actions sont raisonnables.
+```text
+volume lu physiquement
+volume éligible à l’offload
+volume retourné au Database Server
+volume réellement consommé par le SQL
+```
 
-Le lecteur doit produire les requêtes de diagnostic suivantes : affichage du plan réel avec `DBMS_XPLAN.DISPLAY_CURSOR`, lecture des compteurs `cell_offload_eligible_bytes`, `cell_offload_returned_bytes` et `physical_read_bytes` dans `v$sql`, observation des statistiques `v$sysstat` liées à l’offload et à Storage Index, et vérification des attentes `cell%` pertinentes.
+Exemple simplifié :
 
-La production attendue est un court rapport technique comprenant le SQL_ID, le plan observé, les métriques principales, les hypothèses retenues, les hypothèses rejetées, une conclusion et une recommandation. Le rapport doit éviter les affirmations non prouvées.
+```text
+Données lues dans les cells : 900 Go
+Données éligibles à l’offload : 900 Go
+Données retournées sur interconnect : 20 Go
+```
 
-## 14. Corrigé détaillé
+Interprétation :
 
-Un corrigé solide commence par le plan réel. La requête suivante est exécutée avec le SQL_ID fourni :
+```text
+Smart Scan / Offload a probablement réduit fortement le volume retourné.
+```
+
+Autre exemple :
+
+```text
+Données lues : 900 Go
+Données retournées : 850 Go
+```
+
+Interprétation :
+
+```text
+La réduction est faible.
+Le Smart Scan peut être présent, mais le gain est limité.
+```
+
+---
+
+## 13. Storage Index
+
+Storage Index peut compléter Smart Scan.
+
+Il permet à une Storage Cell d’éviter certaines régions de stockage si les métadonnées montrent qu’elles ne peuvent pas contenir les valeurs demandées.
+
+Exemple :
+
+```text
+Région de stockage : dates de janvier à mars
+Requête : ventes de décembre
+Résultat : région potentiellement évitée
+```
+
+Attention :
+
+```text
+Storage Index n’est pas un index B-tree Oracle.
+Il n’est pas créé manuellement comme un index classique.
+```
+
+---
+
+## 14. HCC et Smart Scan
+
+HCC signifie **Hybrid Columnar Compression**.
+
+HCC peut être intéressant avec Exadata pour les données analytiques ou historiques.
+
+Apport possible :
+
+```text
+moins de volume stocké
+moins de volume lu
+meilleure efficacité des scans
+bonne compatibilité avec certaines lectures analytiques
+```
+
+Limites :
+
+```text
+pas adapté à toutes les tables
+à éviter sur charges OLTP très modifiées sans analyse
+peut influencer les coûts de modification
+```
+
+---
+
+## 15. Cas où Smart Scan n’apporte pas de gain
+
+Smart Scan peut ne pas aider si :
+
+```text
+la requête est très sélective via index
+le volume lu est faible
+le plan ne choisit pas un accès compatible
+les prédicats ne sont pas offloadables
+les données sont déjà dans le buffer cache
+la requête retourne presque tout
+les statistiques sont mauvaises
+la requête est surtout CPU
+la lenteur vient d’une jointure ou d’un tri
+la lenteur vient d’un verrou ou d’une attente applicative
+```
+
+À retenir :
+
+```text
+Smart Scan est puissant, mais conditionnel.
+```
+
+---
+
+## 16. Diagnostic d’une requête qui ne bénéficie pas de Smart Scan
+
+Méthode :
+
+```text
+1. Identifier le SQL_ID.
+2. Lire le plan réel.
+3. Chercher TABLE ACCESS STORAGE FULL.
+4. Lire les Predicate Information.
+5. Vérifier storage predicates.
+6. Lire les métriques cell.
+7. Comparer eligible bytes et interconnect bytes.
+8. Vérifier Direct Path Read.
+9. Vérifier statistiques et cardinalités.
+10. Conclure prudemment.
+```
+
+Commandes :
 
 ```sql
 select *
-from table(dbms_xplan.display_cursor(:sql_id, null, 'ALLSTATS LAST +IOSTATS +PREDICATE'));
+from table(dbms_xplan.display_cursor('<sql_id>', null, 'ALLSTATS LAST +PREDICATE'));
+
+select name, value
+from v$sysstat
+where name like 'cell%';
 ```
 
-Le lecteur vérifie d’abord que le plan correspond au SQL étudié. Il regarde le `plan hash value`, les opérations principales, les lignes estimées et réelles, les prédicats et les informations d’I/O. Si le plan contient `TABLE ACCESS STORAGE FULL`, il existe un indice favorable pour Smart Scan. Si le plan contient un accès index très sélectif, l’absence de Smart Scan peut être normale.
+---
 
-Ensuite, le lecteur lit les bytes dans `v$sql`. Si `cell_offload_eligible_bytes` est nul, le SQL observé n’a pas produit de volume éligible à l’offload. Le corrigé doit alors vérifier le plan, le type d’accès, la taille de l’objet, le mode de lecture, le cache et le contexte d’exécution.
+## 17. Exemple complet
 
-Si `cell_offload_eligible_bytes` est élevé mais que `cell_offload_returned_bytes` est proche, Smart Scan peut être présent sans réduction importante. Le corrigé doit expliquer que le filtrage est probablement faible, que les colonnes demandées représentent un volume important, ou que certains prédicats ne sont pas évalués côté cell.
+### Requête
 
-Si eligible bytes est élevé et returned bytes faible, Smart Scan est efficace sur le transfert. Si le temps de réponse reste mauvais, le corrigé doit chercher ailleurs : opérations de join, tri, agrégation, distribution parallèle, CPU, concurrence ou attentes hors I/O.
+```sql
+select customer_id, amount
+from sales
+where sale_date >= date '2026-01-01'
+and sale_date < date '2026-02-01'
+and region = 'FR';
+```
 
-Une conclusion acceptable serait : « Le SQL_ID analysé utilise un `TABLE ACCESS STORAGE FULL` sur `SALES_FACT`. Le volume éligible est de 780 Go et le volume retourné est de 42 Go, ce qui indique un offload efficace. La lenteur restante ne vient probablement pas d’une absence de Smart Scan ; elle doit être recherchée dans les joins et le tri final. »
+### Conditions favorables
 
-Une autre conclusion acceptable serait : « Le SQL_ID analysé utilise un `INDEX RANGE SCAN` très sélectif, avec `cell_offload_eligible_bytes` nul. Smart Scan n’est pas attendu pour ce chemin d’accès. Forcer un full scan pour déclencher Smart Scan n’est pas justifié sans test prouvant un gain. »
+```text
+table volumineuse
+filtre sur date
+filtre sur région
+peu de colonnes retournées
+plan en TABLE ACCESS STORAGE FULL
+Direct Path Read
+prédicats offloadables
+```
 
-## 15. À retenir
+### Ce qui peut se passer
 
-Smart Scan déporte une partie du traitement de recherche et de projection vers les Exadata Storage Servers lorsque le plan et le contexte d’exécution le permettent.[1] Ce mécanisme peut réduire fortement le trafic interconnect, car seules les lignes et colonnes utiles sont renvoyées au database server dans les cas favorables.[2]
+```text
+Storage Cells lisent les données.
+Storage Index peut éviter certaines régions.
+Predicate Filtering élimine les lignes hors période/région.
+Column Projection garde customer_id et amount.
+Database Server reçoit moins de données.
+```
 
-Smart Scan dépend du plan SQL. Les opérations de type full table scan, fast full index scan ou fast full bitmap index scan avec Direct Path Read sont les candidates naturelles. Un index lookup très sélectif peut être parfaitement optimal sans Smart Scan.
+### Conclusion prudente
 
-Les métriques `cell_offload_eligible_bytes` et `cell_offload_returned_bytes` sont essentielles. Eligible élevé avec returned faible indique une réduction efficace. Eligible nul indique que le SQL observé n’a probablement pas emprunté un chemin éligible. Returned proche de eligible indique un filtrage ou une projection peu réducteurs.
+```text
+Si les métriques montrent un volume retourné très inférieur au volume éligible,
+le gain est probablement lié à Smart Scan / Offload.
+```
 
-Storage Index peut réduire les lectures en amont du transfert, mais son efficacité dépend des prédicats et de l’organisation physique des données. HCC peut renforcer l’efficacité des scans analytiques Exadata lorsque la compression, la projection de colonnes et le filtrage côté cell sont adaptés au workload.[1]
+---
 
-Toute conclusion doit être prouvée par un plan réel, des métriques SQL, des statistiques Exadata et, si possible, des observations de session. Une affirmation sans SQL_ID, sans plan et sans bytes n’est pas un diagnostic.
+## 18. Erreurs fréquentes
 
-## 16. Références officielles
+| Erreur | Pourquoi c’est faux | Correction |
+|---|---|---|
+| Smart Scan accélère tout | Toutes les requêtes ne sont pas éligibles | Vérifier plan et métriques |
+| STORAGE dans le plan suffit | Le gain réel doit être mesuré | Lire les bytes cell |
+| Confondre Flash Cache et Smart Scan | Cache accélère, Smart Scan réduit | Séparer les mécanismes |
+| Forcer full scan partout | Un index sélectif peut être meilleur | Optimiser selon le SQL |
+| Ignorer les prédicats | Certaines fonctions empêchent l’offload | Lire Predicate Information |
+| Ignorer les stats | Mauvais plan possible | Vérifier statistiques |
+| Conclure sans période de comparaison | Pas de preuve | Comparer période lente/normale |
 
-[1]: https://docs.oracle.com/en/engineered-systems/exadata-database-machine/sagug/offloading-data-search-and-retrieval-processing.html "Oracle Exadata Database Machine User’s Guide — Offloading Data Search and Retrieval Processing"
+---
 
-[2]: https://www.oracle.com/database/technologies/exadata/software/smartscan/ "Oracle — Exadata Smart Scan"
+## 19. Bonnes pratiques
 
-[3]: https://docs.oracle.com/en/database/oracle/oracle-database/18/arpls/DBMS_XPLAN.html "Oracle Database PL/SQL Packages and Types Reference — DBMS_XPLAN"
+| Bonne pratique | Application |
+|---|---|
+| Partir du SQL_ID | Ne pas raisonner globalement |
+| Lire le plan réel | DBMS_XPLAN avec ALLSTATS |
+| Vérifier les prédicats | storage vs filter |
+| Lire les métriques cell | eligible bytes, interconnect bytes |
+| Comparer les périodes | normal vs lent |
+| Ne pas forcer sans preuve | Éviter les hints inutiles |
+| Optimiser SQL d’abord | Exadata ne corrige pas tout |
+| Documenter la conclusion | Plan + métriques + période |
+
+---
+
+## 20. Exercice pratique
+
+Une requête lit une table `SALES` de plusieurs téraoctets.
+
+Elle retourne seulement deux colonnes et filtre sur une période courte.
+
+Après migration Exadata, elle est beaucoup plus rapide.
+
+Répondez :
+
+1. Pourquoi Smart Scan peut expliquer le gain ?
+2. Quel rôle joue Predicate Filtering ?
+3. Quel rôle joue Column Projection ?
+4. Quel rôle peut jouer Storage Index ?
+5. Quelle métrique permet de vérifier le volume éligible ?
+6. Quelle métrique permet de vérifier le volume retourné ?
+7. Quelle conclusion prudente formuler ?
+
+---
+
+## 21. Corrigé indicatif
+
+Smart Scan peut expliquer le gain parce que la requête lit une grande table, retourne peu de colonnes et applique des filtres compatibles.
+
+Predicate Filtering peut éliminer les lignes hors période directement dans les Storage Cells.
+
+Column Projection peut éviter de renvoyer toutes les colonnes de la table.
+
+Storage Index peut éviter certaines régions de stockage si elles ne contiennent pas la période recherchée.
+
+Métriques utiles :
+
+```text
+cell physical IO bytes eligible for predicate offload
+cell physical IO interconnect bytes
+cell physical IO interconnect bytes returned by smart scan
+```
+
+Conclusion prudente :
+
+```text
+Le gain peut être attribué à Smart Scan / Offload seulement si le plan réel
+et les métriques cell montrent que le volume retourné au Database Server
+est nettement inférieur au volume éligible ou lu.
+```
+
+---
+
+## 22. À retenir
+
+```text
+À retenir
+- Smart Scan est une capacité Exadata liée aux Storage Cells.
+- Il vise surtout les grands scans éligibles.
+- Predicate Filtering réduit les lignes.
+- Column Projection réduit les colonnes.
+- Storage Index peut éviter certaines lectures.
+- Direct Path Read est souvent associé aux chemins compatibles.
+- Voir STORAGE dans le plan ne suffit pas.
+- Le gain doit être prouvé avec les métriques cell.
+- Smart Scan ne remplace pas l’optimisation SQL.
+```
+
+---
+
+## 23. Références officielles
+
+| Référence | Utilisation dans le module |
+|---|---|
+| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Smart Scan, Storage Cells, Exadata System Software. |
+| [Oracle Exadata System Software Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/sagug/) | Offload, CellCLI, métriques cells, Storage Index. |
+| [Oracle Database Performance Tuning Guide](https://docs.oracle.com/en/database/) | Plans SQL, DBMS_XPLAN, wait events, AWR/ASH. |
+| [Oracle Database SQL Tuning Guide](https://docs.oracle.com/en/database/) | Optimisation SQL, plans d’exécution, statistiques. |
