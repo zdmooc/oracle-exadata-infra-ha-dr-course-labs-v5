@@ -1,1 +1,0 @@
-{'modules': 28, 'labs': 19, 'templates': 27, 'diagrams': 13, 'scripts': 9}
