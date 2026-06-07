@@ -1,237 +1,725 @@
-    # Module 02 — Architecture
+# Module 02 — Architecture Exadata
 
-    ## 1. Objectif pédagogique
+## 1. Objectif du module
 
-    Décrire l’architecture technique Exadata : DB servers, storage cells, ASM, GI et réseau privé. Le chapitre vise une compréhension opérationnelle et théorique : l’étudiant doit pouvoir expliquer le mécanisme, reconnaître les composants impliqués, lire les principales vues ou commandes et résoudre un cas d’école sans modifier l’environnement.
+Ce module décrit l’architecture technique d’Oracle Exadata.
 
-    ## 2. Pourquoi ce sujet est important
+L’objectif est de comprendre comment les composants physiques et logiciels coopèrent : **Database Servers**, **Storage Cells**, **ASM**, **Grid Infrastructure**, réseau interne **RoCE / InfiniBand**, réseaux externes, sauvegarde, Data Guard et outils de supervision.
 
-    L’architecture Exadata sépare les rôles : les DB servers exécutent SQL et instances, les storage cells stockent et optimisent les I/O, ASM fournit la couche volume Oracle et le réseau privé transporte les blocs ou résultats filtrés.
+À la fin de ce module, le lecteur doit être capable de :
 
-    L’architecture Exadata est importante parce que les database servers, storage cells, réseau privé, ASM et outils de supervision forment un système intégré. Une panne ou une saturation ne s’interprète correctement qu’en replaçant le symptôme dans cette chaîne.
+- décrire l’architecture globale Exadata ;
+- distinguer Oracle classique, Oracle RAC sur SAN et Oracle Exadata ;
+- expliquer le rôle des Database Servers ;
+- expliquer le rôle des Storage Cells ;
+- comprendre le rôle d’ASM et de Grid Infrastructure ;
+- comprendre les réseaux client, administration, backup et interne ;
+- expliquer où se placent Data Guard, Active Data Guard et ZDLRA ;
+- suivre un flux SQL classique et un flux SQL Exadata ;
+- comprendre la chaîne stockage : physical disk → cell disk → grid disk → ASM disk → diskgroup ;
+- lire les premières commandes de diagnostic read-only ;
+- éviter les conclusions rapides à partir d’une seule couche.
 
-    ## 3. Concepts clés expliqués
+---
 
-    | Concept | Définition claire | Exemple concret |
-    |---|---|---|
-    | **RAC** | Oracle Real Application Clusters permet à plusieurs instances d’accéder à la même base via un cluster. | Deux DB servers peuvent héberger deux instances d’une même base. |
-| **ASM** | Automatic Storage Management répartit les fichiers Oracle sur des disques ASM issus des grid disks Exadata. | Les diskgroups DATA et RECO consomment des grid disks créés dans les cells. |
-| **Interconnect privé** | Réseau RoCE ou InfiniBand utilisé pour le trafic cluster et les échanges rapides entre DB servers et cells. | Un problème de fabric peut produire de la latence I/O ou des symptômes RAC. |
+## 2. Vue d’ensemble de l’architecture Exadata
 
-    Ces concepts doivent être étudiés ensemble. Par exemple, **RAC** n’a pas la même signification isolément que dans une architecture RAC, ASM et storage cells. La compréhension vient de la relation entre objet Oracle, ressource Exadata et workload applicatif.
+Oracle Exadata est une architecture intégrée pour Oracle Database.
 
-    ## 4. Architecture concernée
+Elle combine :
 
-    | Composant | Rôle dans ce chapitre |
-    |---|---|
-    | Database servers | Exécutent les instances, services, agents et outils Oracle liés au module. |
-| Storage cells | Apportent stockage intelligent, flash, offload, alertes ou métriques lorsque le sujet touche les I/O. |
-| ASM / Grid Infrastructure | Fournissent cluster, diskgroups, ressources RAC et accès aux fichiers Oracle. |
-| Réseau RoCE / InfiniBand | Transporte les échanges internes rapides et peut influencer latence et disponibilité. |
-| Outils Oracle | Enterprise Manager, AHF, Exachk, TFA, RMAN ou Data Guard selon le thème étudié. |
-
-    Les diagrammes associés au chapitre sont :
-
-    - [`architecture-globale-exadata.mmd`](../diagrams/architecture-globale-exadata.mmd)
-- [`physical-cell-grid-asm.mmd`](../diagrams/physical-cell-grid-asm.mmd)
-- [`reseau-client-admin-backup-interconnect.mmd`](../diagrams/reseau-client-admin-backup-interconnect.mmd)
-
-    ## 5. Fonctionnement détaillé
-
-    L’architecture Exadata sépare les rôles : les DB servers exécutent SQL et instances, les storage cells stockent et optimisent les I/O, ASM fournit la couche volume Oracle et le réseau privé transporte les blocs ou résultats filtrés.
-
-    Le fonctionnement se lit comme un chemin d’exécution : session SQL, instance RAC, ASM, réseau privé, storage cell, flash ou disque, puis retour des blocs ou résultats filtrés. Cette chaîne explique pourquoi Exadata ne se résume pas à un serveur Oracle plus rapide.
-
-    Pour ce module, les notions centrales sont **RAC, ASM, Interconnect privé**. Elles déterminent la façon dont le composant réagit à une charge réelle. Pour l’architecture, l’analyse commence par localiser la couche concernée et ses dépendances. Elle sépare calcul, stockage, réseau, cluster et administration afin d’éviter les diagnostics mélangés. Une mauvaise lecture consiste à supposer que la plateforme corrige automatiquement un mauvais modèle de données, une requête mal écrite ou une architecture réseau incomplète.
-
-    ## 6. Exemple concret
-
-    Un incident de performance peut provenir du plan SQL, d’ASM, d’une cell saturée ou du réseau privé ; le chapitre montre comment chaque couche intervient.
-
-    Dans ce scénario, l’analyse commence par le symptôme métier, puis remonte vers la couche Oracle concernée. Si le sujet touche les I/O, il faut différencier le temps passé dans Oracle Database, les attentes liées aux cells, la distribution ASM et la santé des storage cells. Si le sujet touche la haute disponibilité, il faut distinguer disponibilité locale RAC, continuité de service, sauvegarde et reprise après sinistre.
-
-    ## 7. Commandes, vues et métriques utiles
-
-    Les commandes ci-dessous sont données comme exemples de lecture. Elles doivent être adaptées aux noms de bases, privilèges, versions et conventions du site.
-
-    ```bash
-    crsctl stat res -t
-srvctl status database -d <db_unique_name> -v
-select instance_name,status,host_name from gv$instance;
-    ```
-
-    | Élément à lire | Interprétation |
-    |---|---|
-    | RAC | Cette information indique comment le mécanisme RAC se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| ASM | Cette information indique comment le mécanisme ASM se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-| Interconnect privé | Cette information indique comment le mécanisme Interconnect privé se comporte dans un cas réel. Elle doit être lue avec le contexte de charge, de version et d’architecture. |
-
-    ## 8. Interprétation des résultats
-
-    L’interprétation doit répondre à une question technique précise. Une valeur isolée ne suffit pas : une latence se compare à une période comparable, un volume d’I/O se compare à un plan SQL et un état RAC se compare au placement attendu des services. Les métriques Exadata sont particulièrement utiles lorsqu’elles expliquent pourquoi un volume important de données a été lu, filtré, renvoyé ou retardé.
-
-    Dans les chapitres performance, les valeurs liées aux bytes, événements `cell`, AWR ou ASH indiquent le chemin dominant. Dans les chapitres HA/DR, les états de rôle, lag, services et ressources cluster décrivent la capacité réelle à basculer ou maintenir le service. Dans les chapitres support et maintenance, les rapports AHF, Exachk ou TFA doivent être lus comme des aides structurées, pas comme des remplacements de raisonnement.
-
-    ## 9. Erreurs fréquentes
-
-    | Erreur | Cause probable | Correction pédagogique |
-    |---|---|---|
-    | Confondre symptôme et cause | Le premier message visible vient parfois d’une couche différente de la cause réelle. | Reconstituer le chemin technique avant de conclure. |
-    | Appliquer une recette générique | Exadata dépend fortement du workload, du plan SQL, de la version et du modèle de service. | Relire les composants du chapitre et adapter le diagnostic. |
-    | Ignorer les dépendances | Une base RAC dépend de GI, ASM, réseau privé et storage cells. | Vérifier les dépendances avant toute hypothèse. |
-    | Oublier les limites du mécanisme | Certaines fonctions Exadata ne s’appliquent pas à tous les accès ou toutes les charges. | Identifier les conditions d’éligibilité et les cas d’exclusion. |
-
-    ## 10. Bonnes pratiques
-
-    | Bonne pratique | Application concrète |
-    |---|---|
-    | Partir du mécanisme | Dessiner le chemin DB → ASM → cell → réseau → retour résultat selon le sujet. |
-    | Séparer lecture et changement | Les commandes de lecture servent à comprendre ; les changements exigent runbook et validation. |
-    | Comparer avec un état de référence | Une valeur a du sens lorsqu’elle est rapprochée d’une période saine ou d’une cible prévue. |
-    | Documenter la version | Les fonctionnalités et commandes peuvent varier selon génération Exadata et version Oracle. |
-
-    ## 11. Exercice pratique
-
-    Vous êtes responsable du sujet **Architecture** sur une plateforme Exadata de formation. À partir du scénario suivant, rédigez une analyse de deux pages :
-
-    > Un incident de performance peut provenir du plan SQL, d’ASM, d’une cell saturée ou du réseau privé ; le chapitre montre comment chaque couche intervient.
-
-    Votre réponse doit inclure un schéma simple des composants impliqués, trois commandes ou vues à exécuter, deux métriques à lire, les erreurs à éviter et une recommandation finale.
-
-    ## 12. Corrigé de l’exercice
-
-    Une bonne réponse commence par identifier les composants du chapitre : **RAC, ASM, Interconnect privé**. Elle explique ensuite le chemin technique suivi par l’opération et indique pourquoi les commandes proposées permettent de vérifier ce chemin. Les commandes attendues sont celles de la section 7, adaptées aux noms réels de l’environnement.
-
-    Le corrigé doit aussi distinguer les observations et les décisions. Par exemple, constater un lag, une alerte cell, un volume `eligible bytes` ou une ressource CRS offline ne suffit pas : il faut expliquer la conséquence sur l’application, la disponibilité ou la performance.  : optimisation SQL, ajustement de plan de ressources, revue réseau, ouverture SR, test de restore ou préparation CAB selon le module.
-
-    ## 13. Synthèse à retenir
-
-    ```text
-    À retenir
-    - Architecture  : base, cluster, ASM, storage cells, réseau et outils Oracle.
-    - Les notions centrales du chapitre sont : RAC, ASM, Interconnect privé.
-    - Les commandes de lecture permettent de comprendre le mécanisme avant toute action de changement.
-    - Les erreurs les plus coûteuses viennent d’une lecture isolée d’une seule couche.
-    - Un bon administrateur Exadata relie toujours architecture, workload, métriques et impact métier.
-    ```
-
-
-
-
-## Rectification V5 vérifiable — contenu expert non générique
-
-Cette section constitue la correction V5 visible du module. Elle remplace l’approche répétitive par un raisonnement propre au thème **Architecture intégrée Exadata**. L’objectif n’est pas d’ajouter une phrase de méthode, mais de montrer comment un administrateur Exadata produit une preuve technique exploitable devant une équipe production, architecture ou support.
-
-| Élément expert V5 | Application concrète au module |
-|---|---|
-| Objets à nommer explicitement | database servers, storage cells, réseau RoCE/InfiniBand, ASM, services RAC. |
-| Méthode de diagnostic | localiser le symptôme par couche avant de choisir un outil. |
-| Cas d’école attendu | un SQL lent peut venir d’un plan, d’un offload absent, d’une latence cell ou d’un service RAC mal placé. |
-| Preuve minimale | Une commande ou vue read-only, une métrique datée, un composant identifié et une interprétation liée au risque métier. |
-| Limite de conclusion | Une mesure isolée ne suffit pas ; elle doit être reliée à la période, au workload, à la version Exadata et à l’objectif de service. |
-
-### Raisonnement attendu en situation réelle
-
-Pour **Architecture intégrée Exadata**, le diagnostic commence par une hypothèse précise et réfutable. L’administrateur doit formuler ce qu’il cherche à prouver : saturation, mauvais placement, absence d’offload, contention entre workloads, défaut de redondance, fenêtre de maintenance insuffisante ou frontière de responsabilité cloud. Ensuite, il collecte uniquement des preuves read-only. Cette discipline évite deux erreurs fréquentes : modifier une plateforme stable sans preuve et confondre un symptôme visible avec la cause racine.
-
-Le livrable attendu dans un contexte professionnel est une courte note technique. Elle doit contenir le symptôme, l’heure, les objets Exadata concernés, les commandes utilisées, les résultats observés, l’interprétation et la prochaine action. Si une modification est proposée, elle doit être séparée du diagnostic et rattachée à un runbook, une validation CAB ou une procédure de support Oracle.
-
-### Exercice V5 complémentaire
-
-Rédigez une analyse opérationnelle pour le cas suivant : **un SQL lent peut venir d’un plan, d’un offload absent, d’une latence cell ou d’un service RAC mal placé**. Votre réponse doit citer les objets Exadata concernés, indiquer trois preuves read-only, expliquer ce qui invaliderait votre hypothèse et proposer une recommandation limitée au périmètre du module.
-
-### Corrigé V5 complémentaire
-
-Une bonne réponse identifie d’abord le composant dominant du sujet **Architecture intégrée Exadata**, puis relie les preuves à un impact mesurable. Les trois preuves doivent couvrir au moins deux couches différentes lorsque le sujet l’exige, par exemple base et cell, cluster et réseau, ou cloud et VM cluster. La recommandation est correcte seulement si elle indique ce qui est prouvé, ce qui reste incertain et quelle action peut être engagée sans créer un risque supérieur au problème initial.
-
-## Références officielles
-
-| Référence | Utilisation dans le module |
-|---|---|
-| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
-| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Administration Exadata, Storage Server, CellCLI, maintenance et monitoring. |
-| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RMAN, Data Guard, AWR/ASH selon licences. |
-| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | Principes HA/DR, Data Guard, sauvegarde et continuité de service. |
-| [Oracle Autonomous Health Framework](https://docs.oracle.com/en/engineered-systems/health-diagnostics/autonomous-health-framework/) | AHF, Exachk, ORAchk, TFA et diagnostics automatisés. |
-## Complément expert V5 — Architecture Exadata de bout en bout
-
-### Explication technique spécifique
-
-Oracle Exadata Database Machine est une plate-forme intégrée pour bases Oracle qui associe **database servers**, **storage servers**, réseau interne à faible latence, Oracle Grid Infrastructure, ASM, Exadata System Software et outils d’administration. La différence fondamentale avec une architecture Oracle classique ne tient pas seulement à la puissance des serveurs. Dans une architecture classique, la base lit des blocs depuis un SAN ou un NAS, puis filtre, joint et agrège les données côté moteur SQL. Dans Exadata, une partie du travail est déplacée vers les **storage cells** : les cellules peuvent appliquer des prédicats, projeter des colonnes, éliminer des régions de stockage et retourner un volume réduit de données vers les database servers. C’est cette coopération entre moteur SQL, ASM, protocole iDB et cellules qui donne à Exadata son caractère d’appliance intégrée.[^v5-exadata-overview]
-
-Les **database servers** hébergent les instances Oracle RAC ou single instance, les processus foreground/background, le cache buffer, le shared pool, les processus ASM et Clusterware. Les **storage cells** hébergent Exadata System Software, présentent des grid disks à ASM, gèrent les disques physiques, les périphériques flash, les métriques cellule et les fonctions d’offload. Le réseau client expose les services SQL aux applications. Le réseau d’administration sert au pilotage, à la supervision et aux opérations d’infrastructure. Le réseau de backup transporte généralement les flux RMAN vers les appliances ou serveurs de sauvegarde. L’interconnect RoCE ou InfiniBand transporte le trafic RAC, ASM et iDB ; il conditionne directement la latence entre les instances et les cellules.
-
-| Couche | Architecture Oracle classique | Exadata |
-|---|---|---|
-| Calcul SQL | Serveurs Oracle lisant des blocs depuis stockage externe | Database servers RAC coopérant avec storage cells |
-| Stockage | SAN/NAS exposant LUN ou volumes | Cell disks, grid disks et ASM diskgroups pilotés par Exadata System Software |
-| Filtrage | Majoritairement côté instance Oracle | Offload possible côté cellule avec Smart Scan |
-| Réseau interne | Fibre Channel, Ethernet ou fabric SAN séparé | RoCE ou InfiniBand pour RAC, ASM et iDB |
-| Supervision | Outils base + stockage souvent séparés | Enterprise Manager, cellcli, métriques Exadata et alertes cellule |
-| Résilience | Dépend fortement du design SAN et du cluster | Redondance ASM, failure groups, cellules multiples, MAA et automatisation support |
-
-Le chemin d’une requête SQL commence par le client, traverse le listener, atteint une instance sur un database server, est optimisé par le moteur SQL, puis accède aux segments via ASM. Si les conditions sont réunies, l’accès aux blocs est transformé en requêtes iDB vers les storage cells. Les cellules lisent disques et flash, appliquent les opérations offloadables, puis renvoient des lignes ou colonnes filtrées. Le chemin d’une I/O non offloadable est plus proche d’une lecture de blocs classique : l’instance demande des extents ASM et reçoit des blocs à traiter côté database server. Le chemin d’un backup RMAN lit les datafiles via ASM, écrit vers RECO, un média manager ou un réseau de backup. Le chemin d’une alerte naît souvent dans une cellule, un serveur, un switch ou un composant logiciel, puis remonte vers Exadata System Software, Enterprise Manager, ASR ou les journaux de diagnostic.
-
-```mermaid
-flowchart LR
-    C[Client applicatif] --> L[Listener SCAN ou local]
-    L --> DB[Database Server RAC]
-    DB --> GI[Grid Infrastructure et ASM]
-    GI --> IDB[Protocole iDB sur RoCE ou InfiniBand]
-    IDB --> CELL[Storage Cell]
-    CELL --> FLASH[Flash Cache et Flash Log]
-    CELL --> DISK[Disques physiques]
-    CELL --> ALERT[Alertes cellule]
-    DB --> RMAN[RMAN]
-    RMAN --> BCK[Réseau ou cible backup]
+```text
+Applications
+→ SCAN / Listeners
+→ Database Servers
+→ Grid Infrastructure / RAC
+→ ASM
+→ Réseau interne RoCE ou InfiniBand
+→ Storage Cells
+→ Flash / Disques
+→ Outils de monitoring et support
 ```
 
-### Exemple concret réaliste
+La différence essentielle avec une architecture Oracle classique est que le stockage Exadata n’est pas passif.
 
-Une requête analytique lit une table de ventes partitionnée sur plusieurs années avec un prédicat sur `sales_date` et `region_id`. Sur SAN classique, la base peut devoir lire un grand nombre de blocs, les transférer au database server, puis filtrer. Sur Exadata, si le plan utilise un full scan direct path et si les prédicats sont offloadables, les storage cells peuvent éliminer des lignes et ne renvoyer que les colonnes utiles. Une statistique SQL Monitor typique montrera alors une différence entre **cell physical IO bytes eligible for predicate offload**, **cell physical IO interconnect bytes** et **physical read bytes**. Si l’interconnect reçoit beaucoup moins d’octets que les cellules n’en lisent, le gain provient de l’offload et non d’un simple cache.
+Dans Exadata, les **Storage Cells** peuvent participer à certains traitements :
 
-### Comment raisonner
+```text
+filtrage de lignes
+projection de colonnes
+réduction des données retournées
+optimisation flash
+priorisation I/O
+métriques et alertes spécifiques
+```
 
-Pour analyser une architecture Exadata, il faut suivre les flux et non seulement lister les composants. Une question SQL se raisonne en quatre chemins : le chemin client vers l’instance, le chemin instance vers ASM, le chemin ASM/iDB vers les cellules et le chemin retour des données filtrées. Une question de disponibilité se raisonne par domaine de panne : database server, cellule, switch, disque, flash, power distribution unit, réseau client ou réseau d’administration. Une question de performance se raisonne par réduction des données transférées, latence interconnect, efficacité flash, concurrence I/O et placement ASM.
+L’architecture Exadata doit donc se lire comme une chaîne complète :
 
-### Commandes / vues utiles
+```text
+SQL → instance Oracle → ASM → réseau interne → Storage Cell → flash/disques → retour réduit ou blocs
+```
+
+---
+
+## 3. Oracle classique vs Oracle Exadata
+
+| Sujet | Oracle classique / RAC sur SAN | Oracle Exadata |
+|---|---|---|
+| Serveurs | Serveurs Oracle physiques ou virtuels | Database Servers Exadata optimisés pour Oracle |
+| Stockage | SAN/NAS externe, souvent passif | Storage Cells intelligentes |
+| Traitement SQL | Principalement côté Database Server | Certaines opérations peuvent être déportées vers les Storage Cells |
+| Smart Scan | Non disponible | Disponible si les conditions sont réunies |
+| Offload SQL | Non disponible | Filtrage/projection possibles côté Storage Cells |
+| ASM | Possible selon design | Central dans le modèle de stockage Exadata |
+| Réseau interne | Ethernet, Fibre Channel, SAN selon design | RoCE ou InfiniBand pour RAC, ASM et iDB |
+| Flash | Dépend de la baie ou du serveur | Flash Cache et Flash Log intégrés aux Storage Cells |
+| IORM | Non disponible au niveau stockage Exadata | Priorisation I/O entre bases, PDB ou workloads |
+| Monitoring | Outils souvent séparés base / stockage / réseau | CellCLI, Enterprise Manager, AHF, Exachk, TFA |
+| Support | Plusieurs composants et parfois plusieurs fournisseurs | Plateforme Oracle engineered supportée comme ensemble |
+
+À retenir :
+
+```text
+Oracle classique : le stockage renvoie surtout des blocs.
+Exadata : les Storage Cells peuvent traiter une partie du travail.
+```
+
+---
+
+## 4. Composants physiques d’une architecture Exadata
+
+### 4.1 Applications et postes clients
+
+Les applications se connectent à Oracle via les services, SCAN listeners ou listeners locaux.
+
+Elles ne font pas partie du rack Exadata, mais elles déclenchent les charges SQL.
+
+### 4.2 Database Servers
+
+Les Database Servers sont les serveurs où s’exécutent Oracle Database.
+
+Ils hébergent :
+
+```text
+Oracle Database
+instances RAC ou single instance
+services applicatifs
+listeners
+processus Oracle
+Grid Infrastructure
+ASM instance
+agents Enterprise Manager
+outils RMAN / AWR / ASH
+```
+
+Ils exécutent le SQL, gèrent la mémoire Oracle, les transactions, les sessions, les plans SQL et la cohérence des données.
+
+### 4.3 Storage Cells
+
+Les Storage Cells sont les serveurs de stockage intelligents Exadata.
+
+Elles hébergent :
+
+```text
+Exadata System Software
+CellCLI
+disques physiques
+flash devices
+cell disks
+grid disks
+Smart Scan
+Offload SQL
+Storage Index
+Flash Cache
+Flash Log
+IORM
+métriques et alertes
+```
+
+Elles stockent les données, mais peuvent aussi participer à certains traitements.
+
+### 4.4 Réseau interne RoCE ou InfiniBand
+
+Le réseau interne relie les Database Servers et les Storage Cells.
+
+Il transporte :
+
+```text
+trafic RAC
+trafic ASM
+trafic iDB
+échanges entre Database Servers et Storage Cells
+```
+
+Il est critique pour la performance et la disponibilité.
+
+### 4.5 Réseaux externes
+
+Une architecture Exadata distingue généralement plusieurs réseaux :
+
+| Réseau | Rôle |
+|---|---|
+| Réseau client | Connexions applicatives vers SCAN / listeners |
+| Réseau administration | Accès d’exploitation, supervision, gestion |
+| Réseau backup | Flux RMAN, sauvegarde, restauration |
+| Réseau interne | RAC, ASM, iDB entre DB servers et Storage Cells |
+
+### 4.6 Flash et disques
+
+Les Storage Cells contiennent de la flash et des disques.
+
+La flash est utilisée notamment pour :
+
+```text
+Flash Cache
+Flash Log
+accélération de lectures fréquentes
+accélération de certaines écritures redo
+```
+
+Les disques fournissent la capacité persistante principale.
+
+---
+
+## 5. Composants logiciels dans les composants physiques
+
+### 5.1 Dans les Database Servers
+
+| Logiciel / service | Rôle |
+|---|---|
+| Oracle Database | Exécute SQL, transactions, mémoire, processus Oracle |
+| RAC | Plusieurs instances accèdent à une même base |
+| Grid Infrastructure | Cluster, ressources, services, VIP, SCAN, ASM |
+| ASM instance | Gère les diskgroups Oracle |
+| Listener / SCAN | Entrée des connexions applicatives |
+| AWR / ASH | Diagnostic performance |
+| RMAN | Sauvegarde et restauration |
+| Enterprise Manager Agent | Supervision et remontée de métriques |
+
+### 5.2 Dans les Storage Cells
+
+| Logiciel / service | Rôle |
+|---|---|
+| Exadata System Software | Logiciel principal des Storage Cells |
+| CellCLI | Interface d’administration et de diagnostic des cells |
+| Smart Scan | Traitement partiel de certains scans dans les cells |
+| Offload SQL | Déport d’une partie du traitement SQL vers les cells |
+| Storage Index | Évite certaines lectures inutiles |
+| Flash Cache | Accélère certaines lectures |
+| Flash Log | Accélère certaines écritures redo |
+| IORM | Priorise les I/O entre workloads |
+| Cell metrics / alerts | Métriques et alertes propres aux cells |
+
+---
+
+## 6. Rôle des Database Servers
+
+Les Database Servers sont la couche de calcul Oracle.
+
+Ils sont responsables de :
+
+```text
+recevoir les connexions SQL
+optimiser les requêtes
+exécuter les plans SQL
+gérer transactions et cohérence
+héberger les instances RAC
+gérer les services applicatifs
+dialoguer avec ASM
+envoyer les demandes I/O vers les Storage Cells
+finaliser les résultats SQL
+```
+
+Même avec Exadata, Oracle Database reste le moteur principal.
+
+Les Storage Cells aident, mais elles ne remplacent pas le Database Server.
+
+---
+
+## 7. Rôle des Storage Cells
+
+Les Storage Cells sont la couche stockage intelligente.
+
+Elles sont responsables de :
+
+```text
+stocker les données
+présenter des grid disks à ASM
+servir les I/O demandées par les Database Servers
+utiliser flash et disques
+exécuter Smart Scan si possible
+appliquer certains filtres SQL si possible
+réduire le volume de données retourné
+prioriser les I/O avec IORM
+fournir des métriques et alertes
+```
+
+Une Storage Cell n’est donc pas une simple baie de disques.
+
+Elle contient des CPU, de la mémoire, un logiciel Exadata et des fonctions d’optimisation.
+
+---
+
+## 8. Rôle d’ASM et de Grid Infrastructure
+
+### 8.1 ASM
+
+ASM organise les disques Exadata en diskgroups Oracle.
+
+La chaîne de stockage est :
+
+```text
+Physical Disk / Flash
+→ Cell Disk
+→ Grid Disk
+→ ASM Disk
+→ ASM Diskgroup
+→ Datafiles / Redo / Controlfiles / FRA
+```
+
+ASM gère :
+
+```text
+DATA
+RECO
+DBFS si utilisé
+redondance
+failure groups
+répartition des extents
+rebalance
+capacité utilisable
+```
+
+### 8.2 Grid Infrastructure
+
+Grid Infrastructure gère la couche cluster.
+
+Elle fournit :
+
+```text
+Oracle Clusterware
+ressources RAC
+services applicatifs
+VIP / SCAN
+ASM
+placement des services
+haute disponibilité locale
+```
+
+Sur Exadata, GI est essentiel parce que la plateforme est souvent utilisée avec RAC.
+
+---
+
+## 9. Réseaux dans une architecture Exadata
+
+| Réseau | Description | Risque si problème |
+|---|---|---|
+| Client | Flux applicatifs vers Oracle | Connexion impossible, latence applicative |
+| Administration | Accès exploitation, supervision, maintenance | Difficulté d’administration |
+| Backup | Flux RMAN / sauvegarde / restauration | Sauvegarde lente ou fenêtre dépassée |
+| Interne RoCE / InfiniBand | RAC, ASM, iDB entre DB servers et cells | Latence I/O, symptômes RAC, ralentissements SQL |
+
+Le réseau interne est particulièrement important.
+
+Un problème sur ce réseau peut être vu comme :
+
+```text
+SQL lent
+attentes cell
+latence ASM
+problème RAC
+problème d’accès aux Storage Cells
+```
+
+---
+
+## 10. Où se placent Data Guard, Active Data Guard et ZDLRA ?
+
+### 10.1 Data Guard
+
+Data Guard n’est pas une Storage Cell et ne fait pas partie de la chaîne de stockage interne Exadata.
+
+C’est une solution de réplication Oracle vers une base standby.
+
+```text
+Base primaire Exadata
+→ redo transport
+→ base standby sur site distant
+```
+
+Rôle :
+
+```text
+reprise après sinistre
+protection des données
+réduction du RPO
+bascule contrôlée ou automatique selon configuration
+```
+
+### 10.2 Active Data Guard
+
+Active Data Guard est une extension de Data Guard.
+
+Elle permet d’ouvrir la base standby en lecture pendant que la réplication continue.
+
+Usage :
+
+```text
+reporting sur standby
+lecture distante
+déchargement de certains workloads
+tests de lecture
+```
+
+### 10.3 ZDLRA
+
+ZDLRA signifie **Zero Data Loss Recovery Appliance**.
+
+Ce n’est pas une Storage Cell Exadata.
+
+C’est une appliance Oracle dédiée à la sauvegarde et au recovery.
+
+Elle reçoit des sauvegardes RMAN et des redo/archivelogs selon l’architecture.
+
+```text
+Base Exadata
+→ RMAN / redo
+→ ZDLRA
+→ restauration / recovery
+```
+
+Rôle :
+
+```text
+sauvegarde centralisée
+recovery
+réduction de perte de données
+validation des sauvegardes
+historique de restauration
+```
+
+### 10.4 Résumé de placement
+
+| Élément | Où il se place | Rôle |
+|---|---|---|
+| Data Guard | Entre base primaire et base standby | Réplication et reprise après sinistre |
+| Active Data Guard | Sur la base standby ouverte en lecture | Reporting / lecture sur standby |
+| ZDLRA | Cible de sauvegarde/recovery externe | Sauvegarde RMAN et restauration |
+| Storage Cell | Dans le rack Exadata | Stockage intelligent et offload |
+
+---
+
+## 11. Flux SQL classique
+
+Dans une architecture classique :
+
+```text
+Application
+→ Oracle Database Server
+→ Stockage SAN/NAS
+→ Oracle Database Server
+→ Application
+```
+
+Déroulement :
+
+```text
+1. L’application envoie une requête SQL.
+2. Le serveur Oracle optimise la requête.
+3. Oracle demande les blocs au stockage SAN/NAS.
+4. Le stockage renvoie les blocs.
+5. Oracle filtre les lignes, choisit les colonnes et exécute le plan.
+6. Oracle renvoie le résultat à l’application.
+```
+
+Limite :
+
+```text
+Le stockage renvoie souvent beaucoup de blocs.
+Le serveur Oracle fait ensuite le tri.
+```
+
+---
+
+## 12. Flux SQL Exadata
+
+Dans Exadata :
+
+```text
+Application
+→ Database Server
+→ ASM
+→ Storage Cell
+→ Flash / Disques
+→ Storage Cell
+→ Database Server
+→ Application
+```
+
+Déroulement :
+
+```text
+1. L’application envoie une requête SQL.
+2. Le Database Server optimise le plan SQL.
+3. ASM localise les extents et diskgroups.
+4. Le Database Server envoie une demande iDB aux Storage Cells.
+5. Les Storage Cells lisent flash ou disques.
+6. Si possible, elles filtrent certaines lignes et projettent certaines colonnes.
+7. Elles renvoient moins de données au Database Server.
+8. Le Database Server finalise le traitement SQL.
+9. Le résultat revient à l’application.
+```
+
+Plus Exadata :
+
+```text
+Smart Scan
+Offload SQL
+Storage Index
+Flash Cache
+IORM
+métriques CellCLI
+```
+
+---
+
+## 13. Chaîne de stockage Exadata
+
+La chaîne stockage est fondamentale :
+
+```text
+Physical Disk / Flash
+→ Cell Disk
+→ Grid Disk
+→ ASM Disk
+→ ASM Diskgroup
+→ Fichiers Oracle
+```
+
+| Niveau | Description |
+|---|---|
+| Physical Disk / Flash | Support réel dans la Storage Cell |
+| Cell Disk | Objet créé dans la cell à partir du support physique |
+| Grid Disk | Portion de cell disk présentée au cluster |
+| ASM Disk | Disque vu par ASM |
+| ASM Diskgroup | Groupe logique ASM comme DATA ou RECO |
+| Fichiers Oracle | Datafiles, redo logs, controlfiles, FRA selon design |
+
+Cette chaîne relie la couche physique à Oracle Database.
+
+---
+
+## 14. Commandes read-only utiles
+
+### 14.1 Cluster et RAC
 
 ```bash
-# Read-only : inventaire cellule et métriques principales
-cellcli -e "list cell detail"
-cellcli -e "list griddisk attributes name,asmmodestatus,asmdeactivationoutcome,size"
-cellcli -e "list metriccurrent where objectType = 'CELL' attributes name,metricValue"
+crsctl stat res -t
+olsnodes -n
+srvctl config database
+srvctl status database -d <db_unique_name> -v
+```
 
-# Read-only : vision ASM
+### 14.2 ASM
+
+```bash
 asmcmd lsdg
 asmcmd lsdsk -p
 ```
 
 ```sql
--- Read-only : repérer services, instances et environnement RAC
-select inst_id, instance_name, host_name, status from gv$instance order by inst_id;
-select name, value from v$parameter where name in ('cluster_database','db_unique_name');
-select name, total_mb, free_mb, type, state from v$asm_diskgroup order by name;
+select name, total_mb, free_mb, type, state
+from v$asm_diskgroup
+order by name;
 ```
 
-### Comment interpréter
+### 14.3 Instances Oracle
 
-Une architecture Exadata saine se reconnaît par la cohérence entre les couches. Les diskgroups ASM doivent voir les grid disks attendus, les cellules doivent être en état normal, les chemins réseau ne doivent pas montrer d’erreurs persistantes, et les plans SQL candidats doivent produire des métriques d’offload lorsqu’ils remplissent les conditions. Un manque d’offload sur une requête n’est pas automatiquement une anomalie : index access, fonctions non offloadables, types de données, chiffrement, statistiques ou choix de plan peuvent expliquer que le moteur reste côté database server.
+```sql
+select inst_id, instance_name, host_name, status
+from gv$instance
+order by inst_id;
 
-### Exercice pratique
+select name, value
+from v$parameter
+where name in ('db_name','db_unique_name','cluster_database');
+```
 
-Explique pourquoi Exadata réduit certaines I/O par rapport à une architecture SAN classique. Construis une réponse qui distingue la quantité lue sur disque, la quantité transférée sur l’interconnect et la quantité réellement consommée par le moteur SQL.
+### 14.4 Storage Cells
 
-### Corrigé détaillé
+```bash
+cellcli -e "list cell detail"
+cellcli -e "list physicaldisk"
+cellcli -e "list celldisk"
+cellcli -e "list griddisk"
+cellcli -e "list griddisk attributes name,status,asmmodestatus,asmdeactivationoutcome"
+cellcli -e "list alert history"
+```
 
-Exadata ne réduit pas toutes les I/O de façon magique. Il réduit certaines I/O **vues par le database server** parce que les storage cells peuvent exécuter une partie du travail au plus près des données. Si une table scan est éligible au Smart Scan, les cellules lisent les extents ASM, appliquent les prédicats offloadables et renvoient uniquement les lignes et colonnes nécessaires. Le disque ou la flash peut donc lire un volume important, mais l’interconnect transporte un volume inférieur. Dans une architecture SAN classique, le SAN renvoie principalement des blocs ; le database server doit ensuite filtrer. La bonne réponse doit donc distinguer les bytes lus physiquement, les bytes éligibles à l’offload et les bytes renvoyés sur l’interconnect. La réduction provient de l’intelligence des cellules, du protocole iDB, du stockage ASM distribué et des optimisations Exadata System Software, pas seulement de disques plus rapides.
+### 14.5 Data Guard
 
-### Limites et pièges
+```sql
+select database_role, open_mode, protection_mode, switchover_status
+from v$database;
 
-Le piège le plus courant consiste à attribuer toute amélioration à Smart Scan. Une requête peut être rapide parce que les données sont dans Flash Cache, parce que le plan utilise un index sélectif, parce que la partition pruning fonctionne ou parce que le jeu de données est déjà en cache. À l’inverse, une requête peut ne pas offloader malgré Exadata si elle utilise des fonctions non éligibles, des accès indexés très sélectifs ou des opérations qui imposent un traitement côté instance. L’architecture doit donc être lue avec SQL Monitor, les statistiques cellule, ASM et les métriques réseau.
+select name, value, unit
+from v$dataguard_stats;
+```
 
-### À retenir
+### 14.6 RMAN / ZDLRA
 
-Exadata est une architecture coopérative. Les database servers exécutent SQL et RAC, les storage cells exécutent stockage et offload, ASM orchestre les extents et les diskgroups, et le réseau interne relie ces couches. Apprendre Exadata consiste à comprendre les chemins réels d’une requête, d’une I/O, d’un backup et d’une alerte.
+```bash
+rman target /
+```
 
-[^v5-exadata-overview]: Oracle, *Oracle Exadata Database Machine System Overview*, https://docs.oracle.com/en/engineered-systems/exadata-database-machine/
+```rman
+list backup summary;
+report obsolete;
+restore database validate;
+```
+
+Ces commandes sont des exemples read-only ou de validation. Elles doivent être adaptées aux procédures internes.
+
+---
+
+## 15. Interprétation d’un incident
+
+Une requête lente sur Exadata peut venir de plusieurs couches :
+
+```text
+plan SQL
+statistiques obsolètes
+absence de Smart Scan
+Storage Cell saturée
+Flash Cache inefficace
+réseau interne lent
+ASM rebalance
+service RAC mal placé
+batch concurrent
+sauvegarde RMAN en cours
+```
+
+Méthode :
+
+```text
+1. Identifier le symptôme.
+2. Localiser la couche possible.
+3. Lire les métriques.
+4. Croiser database, ASM, cells et réseau.
+5. Distinguer observation et décision.
+6. Proposer une action seulement avec preuve.
+```
+
+---
+
+## 16. Erreurs fréquentes
+
+| Erreur | Pourquoi c’est dangereux | Correction |
+|---|---|---|
+| Confondre Storage Cell et baie SAN | On rate l’intelligence Exadata | Lire CellCLI et comprendre offload/flash/IORM |
+| Penser que RAC suffit pour le DR | RAC protège localement, pas forcément le site | Ajouter Data Guard selon besoin RPO/RTO |
+| Confondre Data Guard et ZDLRA | L’un réplique, l’autre sauvegarde/recover | Séparer DR et backup/recovery |
+| Lire uniquement côté base | La cause peut venir des cells ou du réseau interne | Croiser DB, ASM, CellCLI, AWR/ASH |
+| Croire que Smart Scan marche toujours | Certaines requêtes ne sont pas éligibles | Vérifier plan SQL et métriques cell |
+| Modifier sans preuve | Risque d’aggraver l’incident | Diagnostic read-only puis runbook |
+
+---
+
+## 17. Exercice pratique
+
+Vous analysez une plateforme Exadata de production.
+
+Une application signale des lenteurs intermittentes sur certaines requêtes.
+
+Rédigez une analyse en répondant aux questions suivantes :
+
+1. Quels composants physiques faut-il vérifier ?
+2. Quels composants logiciels sont impliqués ?
+3. Quel est le chemin SQL possible ?
+4. Comment distinguer un problème SQL, ASM, Storage Cell ou réseau ?
+5. Où Data Guard intervient-il ?
+6. Où ZDLRA intervient-il ?
+7. Quelles commandes read-only utiliser ?
+8. Quelle conclusion prudente formuler ?
+
+---
+
+## 18. Corrigé indicatif
+
+Une bonne réponse doit identifier les couches suivantes :
+
+```text
+Application
+SCAN / listener
+Database Server
+RAC / Grid Infrastructure
+ASM
+réseau interne RoCE ou InfiniBand
+Storage Cells
+Flash / disques
+monitoring
+backup / Data Guard si concernés
+```
+
+Elle doit expliquer que le flux SQL peut être classique ou bénéficier d’Exadata :
+
+```text
+SQL classique : blocs renvoyés puis filtrés côté Database Server.
+SQL Exadata : demande iDB vers Storage Cells, filtrage/projection possible côté cell.
+```
+
+Elle doit séparer Data Guard et ZDLRA :
+
+```text
+Data Guard = réplication vers une standby pour DR.
+Active Data Guard = standby ouverte en lecture.
+ZDLRA = appliance de sauvegarde/recovery RMAN.
+```
+
+Elle doit proposer des commandes read-only :
+
+```bash
+crsctl stat res -t
+olsnodes -n
+asmcmd lsdg
+cellcli -e "list cell detail"
+cellcli -e "list alert history"
+```
+
+La conclusion doit rester prudente :
+
+```text
+À ce stade, on ne modifie pas la plateforme.
+On collecte les preuves, on compare à une période saine,
+on identifie la couche dominante,
+puis on propose une action avec runbook.
+```
+
+---
+
+## 19. À retenir
+
+```text
+À retenir
+- Exadata est une architecture intégrée : Database Servers + Storage Cells + ASM + GI + réseau interne.
+- Les Database Servers exécutent Oracle Database, RAC, services et SQL.
+- Les Storage Cells stockent les données et peuvent exécuter Smart Scan / Offload.
+- ASM relie les grid disks aux fichiers Oracle.
+- Le réseau interne transporte RAC, ASM et iDB.
+- Data Guard protège par réplication vers une standby.
+- Active Data Guard permet la lecture sur standby.
+- ZDLRA sert au backup et au recovery RMAN.
+- Un incident Exadata doit toujours être replacé dans la chaîne complète.
+```
+
+---
+
+## 20. Références officielles
+
+| Référence | Utilisation dans le module |
+|---|---|
+| [Oracle University — Exadata Database Machine Administration Workshop](https://education.oracle.com/exadata-database-machine-administration-workshop/courP_4599) | Cadre pédagogique général du workshop. |
+| [Oracle Exadata Documentation](https://docs.oracle.com/en/engineered-systems/exadata-database-machine/) | Architecture, Storage Server, CellCLI, maintenance et monitoring. |
+| [Oracle Database Documentation](https://docs.oracle.com/en/database/) | Vues dynamiques, SQL, RAC, ASM, RMAN, Data Guard, AWR/ASH. |
+| [Oracle Maximum Availability Architecture](https://www.oracle.com/database/technologies/high-availability/maa.html) | RAC, Data Guard, Active Data Guard, MAA et continuité de service. |
+| [Oracle Zero Data Loss Recovery Appliance Documentation](https://docs.oracle.com/en/engineered-systems/zero-data-loss-recovery-appliance/) | ZDLRA, sauvegarde, recovery et protection des données. |
